@@ -1,4 +1,4 @@
-package com.chyvacheck.pocketfiles.metadata;
+package com.chyvacheck.pocketfiles.metadata.status;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

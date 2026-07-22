@@ -1,4 +1,4 @@
-package com.chyvacheck.pocketfiles.metadata;
+package com.chyvacheck.pocketfiles.metadata.support;
 
 public final class CodedEnums {
 	private CodedEnums() {

@@ -1,4 +1,7 @@
-package com.chyvacheck.pocketfiles.metadata;
+package com.chyvacheck.pocketfiles.metadata.status;
+
+import com.chyvacheck.pocketfiles.metadata.support.CodedEnum;
+import com.chyvacheck.pocketfiles.metadata.support.CodedEnums;
 
 public enum PhysicalFileStatus implements CodedEnum {
 
@@ -34,7 +37,7 @@ public enum PhysicalFileStatus implements CodedEnum {
 
 	/**
 	 * The constructor.
-	 * 
+	 *
 	 * @param code The code of the status.
 	 */
 	PhysicalFileStatus(int code) {
@@ -43,7 +46,7 @@ public enum PhysicalFileStatus implements CodedEnum {
 
 	/**
 	 * Get the code of the status.
-	 * 
+	 *
 	 * @return The code of the status.
 	 */
 	public int getCode() {
