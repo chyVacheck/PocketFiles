@@ -1,0 +1,88 @@
+name: Feature request
+description: Suggest an improvement or new capability for PocketFiles
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement to PocketFiles.
+
+        Before submitting, please check whether a similar request already exists.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: Describe the problem, limitation, or use case behind this request.
+      placeholder: What is currently difficult, missing, or impossible?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe how you think the problem could be solved.
+      placeholder: Explain the expected behavior or API.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Explain where and why this feature would be useful.
+      placeholder: Describe a concrete scenario.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any alternative solutions or workarounds you considered.
+
+  - type: textarea
+    id: api-example
+    attributes:
+      label: Example API or usage
+      description: Add a small code example if it helps explain the proposal.
+      render: java
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Select the part of PocketFiles most related to this request.
+      options:
+        - Core API
+        - Metadata
+        - Storage
+        - File usages
+        - Deduplication
+        - Configuration
+        - Documentation
+        - Build or tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other details, references, or examples.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This request is consistent with the goals of PocketFiles.
+          required: true
+        - label: I described the problem separately from the proposed solution.
+          required: true

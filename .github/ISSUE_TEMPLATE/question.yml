@@ -1,0 +1,81 @@
+name: Question
+description: Ask a question about using, configuring, or designing with PocketFiles
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your interest in PocketFiles.
+
+        Before submitting, please check the README, documentation, and existing issues.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Clearly describe what you would like to understand.
+      placeholder: What would you like to know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain what you are trying to build or achieve.
+      placeholder: Describe your project, use case, or current approach.
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Describe what you already tried or which documentation you reviewed.
+      placeholder: Add code, configuration, or references if useful.
+
+  - type: textarea
+    id: code-example
+    attributes:
+      label: Code or configuration example
+      description: Add a minimal example if it helps explain the question.
+      render: java
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related area
+      description: Select the area most related to your question.
+      options:
+        - Core API
+        - Metadata
+        - Storage
+        - File usages
+        - Deduplication
+        - Configuration
+        - Architecture
+        - Documentation
+        - Build or tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other information, links, or examples.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find an answer.
+          required: true
+        - label: I reviewed the available documentation.
+          required: true
+        - label: This question is specifically related to PocketFiles.
+          required: true

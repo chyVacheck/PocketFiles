@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible problem in PocketFiles
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug.
+
+        Before submitting, please make sure the issue is reproducible and has not already been reported.
+
+  - type: input
+    id: version
+    attributes:
+      label: PocketFiles version
+      description: Specify the affected version, tag, or commit hash.
+      placeholder: v0.1.0-alpha or commit hash
+    validations:
+      required: true
+
+  - type: input
+    id: java-version
+    attributes:
+      label: Java version
+      description: Specify the Java version used when the problem occurred.
+      placeholder: Java 21
+    validations:
+      required: true
+
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      description: Specify the operating system and version.
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem description
+      description: Clearly describe what went wrong.
+      placeholder: Describe the problem and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence of steps.
+      placeholder: |
+        1. Configure ...
+        2. Call ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: Describe what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or stack trace
+      description: Add relevant logs, stack traces, or error messages.
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other information that may help investigate the issue.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I removed secrets and private data from logs and examples.
+          required: true
+        - label: I can reproduce this issue consistently.
+          required: true
