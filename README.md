@@ -13,6 +13,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/chyVacheck/PocketFiles/actions/workflows/build.yml">
+    <img src="https://github.com/chyVacheck/PocketFiles/actions/workflows/build.yml/badge.svg" alt="Build">
+  </a>
+</p>
+
+<p align="center">
     PocketFiles is a reusable file management infrastructure for Java applications.
 </p>
 
