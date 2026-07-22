@@ -5,7 +5,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Types;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -107,7 +106,7 @@ public final class PhysicalFileRepository {
 			statement.setInt(8, metadata.status().getCode());
 			statement.setLong(9, metadata.createdAt());
 			statement.setLong(10, metadata.statusChangedAt());
-			this.setLongOrNull(statement, 11, metadata.deletedAt());
+			JdbcValueUtils.setLongOrNull(statement, 11, metadata.deletedAt());
 
 			statement.executeUpdate();
 
@@ -212,44 +211,7 @@ public final class PhysicalFileRepository {
 				PhysicalFileStatus.fromCode(resultSet.getInt("status")),
 				resultSet.getLong("created_at"),
 				resultSet.getLong("status_changed_at"),
-				this.getLongOrNull(resultSet, "deleted_at"));
-	}
-
-	/**
-	 * Sets a long value or null in a prepared statement.
-	 *
-	 * @param statement The prepared statement to use.
-	 * @param index     The index of the parameter to set.
-	 * @param value     The value to set.
-	 * @throws SQLException If an SQL error occurs.
-	 */
-	private void setLongOrNull(PreparedStatement statement, int index, Long value)
-			throws SQLException {
-		Objects.requireNonNull(statement, "statement must not be null");
-
-		if (value != null) {
-			statement.setLong(index, value);
-		} else {
-			statement.setNull(index, Types.INTEGER);
-		}
-	}
-
-	/**
-	 * Reads a nullable long value from the current result set row.
-	 *
-	 * @param resultSet  result set positioned on a valid row
-	 * @param columnName column name to read
-	 * @return long value or null if the SQL value is NULL
-	 * @throws SQLException if the column cannot be read
-	 */
-	private Long getLongOrNull(ResultSet resultSet, String columnName) throws SQLException {
-		long value = resultSet.getLong(columnName);
-
-		if (resultSet.wasNull()) {
-			return null;
-		}
-
-		return value;
+				JdbcValueUtils.getLongOrNull(resultSet, "deleted_at"));
 	}
 
 }
