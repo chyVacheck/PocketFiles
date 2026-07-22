@@ -55,6 +55,8 @@ class FileUsageRepositoryTest {
 
 	private static final long CREATED_AT = 1760000000000L;
 
+	private static final long DELETED_AT = 1760000005000L;
+
 	@TempDir
 	Path tempDir;
 
@@ -294,6 +296,137 @@ class FileUsageRepositoryTest {
 					() -> fileUsageRepository.findByUuid(connection, null));
 
 			assertEquals("uuid must not be null", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedConnectionIsNull() {
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> fileUsageRepository.markDeleted(null, 1L, DELETED_AT));
+
+		assertEquals("connection must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedIdIsZero() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> fileUsageRepository.markDeleted(connection, 0L, DELETED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedIdIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> fileUsageRepository.markDeleted(connection, -1L, DELETED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenDeletedAtIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> fileUsageRepository.markDeleted(connection, 1L, -1L));
+
+			assertEquals("deletedAt must not be negative", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedFileUsageDoesNotExist() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			SQLException exception = assertThrows(
+					SQLException.class,
+					() -> fileUsageRepository.markDeleted(connection, 999L, DELETED_AT));
+
+			assertEquals("Failed to find deleted file usage: 999", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldMarkFileUsageMetadataAsDeleted() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			FileUsageMetadata insertedMetadata = fileUsageRepository.insert(
+					connection,
+					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
+
+			FileUsageMetadata deletedMetadata = fileUsageRepository.markDeleted(
+					connection,
+					insertedMetadata.id(),
+					DELETED_AT);
+
+			assertEquals(insertedMetadata.id(), deletedMetadata.id());
+			assertEquals(insertedMetadata.uuid(), deletedMetadata.uuid());
+			assertEquals(insertedMetadata.physicalFileId(), deletedMetadata.physicalFileId());
+			assertEquals(insertedMetadata.usageType(), deletedMetadata.usageType());
+			assertEquals(insertedMetadata.ownerType(), deletedMetadata.ownerType());
+			assertEquals(insertedMetadata.ownerId(), deletedMetadata.ownerId());
+			assertEquals(insertedMetadata.displayName(), deletedMetadata.displayName());
+			assertEquals(insertedMetadata.metadataJson(), deletedMetadata.metadataJson());
+			assertEquals(FileUsageStatus.DELETED, deletedMetadata.status());
+			assertEquals(insertedMetadata.createdAt(), deletedMetadata.createdAt());
+			assertEquals(DELETED_AT, deletedMetadata.deletedAt());
+		}
+	}
+
+	@Test
+	void shouldFindDeletedFileUsageMetadataAfterMarkDeleted() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			FileUsageMetadata insertedMetadata = fileUsageRepository.insert(
+					connection,
+					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
+
+			fileUsageRepository.markDeleted(
+					connection,
+					insertedMetadata.id(),
+					DELETED_AT);
+
+			FileUsageMetadata foundMetadata = fileUsageRepository.findById(
+					connection,
+					insertedMetadata.id())
+					.orElseThrow();
+
+			assertEquals(FileUsageStatus.DELETED, foundMetadata.status());
+			assertEquals(DELETED_AT, foundMetadata.deletedAt());
 		}
 	}
 

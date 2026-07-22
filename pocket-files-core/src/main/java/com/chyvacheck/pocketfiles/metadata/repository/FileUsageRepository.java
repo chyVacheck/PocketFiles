@@ -72,6 +72,17 @@ public final class FileUsageRepository {
 			WHERE uuid = ?
 			""";
 
+	/**
+	 * SQL statement to mark a file usage metadata as deleted.
+	 */
+	private static final String MARK_DELETED_SQL = """
+			UPDATE file_usages
+			SET
+				status = ?,
+				deleted_at = ?
+			WHERE id = ?
+			""";
+
 	// Methods
 
 	/**
@@ -182,6 +193,39 @@ public final class FileUsageRepository {
 				return Optional.of(this.mapRow(resultSet));
 			}
 		}
+	}
+
+	/**
+	 * Marks a file usage metadata as deleted.
+	 *
+	 * @param connection The database connection to use.
+	 * @param id         The ID of the file usage metadata to mark as deleted.
+	 * @param deletedAt  The timestamp in epoch milliseconds when the file usage
+	 *                   metadata was deleted.
+	 * @return The updated file usage metadata.
+	 * @throws SQLException If an SQL error occurs.
+	 */
+	public FileUsageMetadata markDeleted(Connection connection, long id, long deletedAt) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (id <= 0) {
+			throw new IllegalArgumentException("id must be positive");
+		}
+
+		if (deletedAt < 0) {
+			throw new IllegalArgumentException("deletedAt must not be negative");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(MARK_DELETED_SQL)) {
+			statement.setInt(1, FileUsageStatus.DELETED.getCode());
+			statement.setLong(2, deletedAt);
+			statement.setLong(3, id);
+
+			statement.executeUpdate();
+		}
+
+		return this.findById(connection, id)
+				.orElseThrow(() -> new SQLException("Failed to find deleted file usage: " + id));
 	}
 
 	// Helpers
