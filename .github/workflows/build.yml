@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  # Run CI when changes are pushed to the main branch.
+  push:
+    branches:
+      - main
+
+  # Run CI before changes are merged into the main branch.
+  pull_request:
+    branches:
+      - main
+
+# Grant the workflow only the permission required to read repository files.
+permissions:
+  contents: read
+
+# Cancel an older run when a newer commit is pushed to the same branch or PR.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download the repository source code into the runner.
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Install the Java version required by PocketFiles.
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Configure Gradle and cache downloaded dependencies.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # Compile the project, run tests and build the library JAR.
+      - name: Build and test
+        run: ./gradlew build --no-daemon
