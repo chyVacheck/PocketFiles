@@ -2,8 +2,10 @@ package com.chyvacheck.pocketfiles;
 
 import com.chyvacheck.pocketfiles.config.DirectoryDepth;
 import com.chyvacheck.pocketfiles.config.PocketFilesConfig;
+import com.chyvacheck.pocketfiles.metadata.model.FileUsageMetadata;
 import com.chyvacheck.pocketfiles.metadata.status.FileUsageStatus;
 import com.chyvacheck.pocketfiles.metadata.status.PhysicalFileStatus;
+import com.chyvacheck.pocketfiles.service.OpenFileResult;
 import com.chyvacheck.pocketfiles.service.SaveFileCommand;
 import com.chyvacheck.pocketfiles.service.SaveFileResult;
 import org.junit.jupiter.api.Test;
@@ -150,6 +152,73 @@ class PocketFilesTest {
 		assertEquals("png", result.physicalFileMetadata().extension());
 		assertEquals(HELLO_SHA256, result.physicalFileMetadata().sha256());
 		assertTrue(Files.exists(result.storedFile().absolutePath()));
+	}
+
+	@Test
+	void shouldOpenFileThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		OpenFileResult openResult = pocketFiles.open(saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.fileUsageMetadata(), openResult.fileUsageMetadata());
+		assertEquals(saveResult.physicalFileMetadata(), openResult.physicalFileMetadata());
+		assertEquals(saveResult.storedFile().absolutePath(), openResult.absolutePath());
+
+		assertTrue(Files.isRegularFile(openResult.absolutePath()));
+		assertEquals(CONTENT, Files.readString(openResult.absolutePath()));
+	}
+
+	@Test
+	void shouldDeleteFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		FileUsageMetadata deletedMetadata = pocketFiles.delete(
+				saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.fileUsageMetadata().id(), deletedMetadata.id());
+		assertEquals(saveResult.fileUsageMetadata().uuid(), deletedMetadata.uuid());
+		assertEquals(FileUsageStatus.DELETED, deletedMetadata.status());
+		assertEquals(CREATED_AT, deletedMetadata.createdAt());
+		assertEquals(CREATED_AT, deletedMetadata.deletedAt());
+	}
+
+	@Test
+	void shouldNotOpenDeletedFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
+
+		IllegalArgumentException exception = assertThrows(
+				IllegalArgumentException.class,
+				() -> pocketFiles.open(saveResult.fileUsageMetadata().uuid()));
+
+		assertEquals(
+				"File usage is not active: " + saveResult.fileUsageMetadata().uuid(),
+				exception.getMessage());
 	}
 
 	private PocketFilesConfig createConfig() {

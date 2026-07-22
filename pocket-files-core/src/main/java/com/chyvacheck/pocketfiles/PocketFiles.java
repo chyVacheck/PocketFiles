@@ -3,10 +3,14 @@ package com.chyvacheck.pocketfiles;
 import com.chyvacheck.pocketfiles.config.PocketFilesConfig;
 import com.chyvacheck.pocketfiles.metadata.DatabaseConnectionFactory;
 import com.chyvacheck.pocketfiles.metadata.MetadataSchemaInitializer;
+import com.chyvacheck.pocketfiles.metadata.model.FileUsageMetadata;
 import com.chyvacheck.pocketfiles.metadata.repository.FileUsageRepository;
 import com.chyvacheck.pocketfiles.metadata.repository.PhysicalFileRepository;
 import com.chyvacheck.pocketfiles.metadata.transaction.MetadataTransactionManager;
+import com.chyvacheck.pocketfiles.service.FileDeleteService;
+import com.chyvacheck.pocketfiles.service.FileOpenService;
 import com.chyvacheck.pocketfiles.service.FileSaveService;
+import com.chyvacheck.pocketfiles.service.OpenFileResult;
 import com.chyvacheck.pocketfiles.service.SaveFileCommand;
 import com.chyvacheck.pocketfiles.service.SaveFileResult;
 import com.chyvacheck.pocketfiles.storage.FinalFileMover;
@@ -22,6 +26,7 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Main public entry point for PocketFiles.
@@ -32,15 +37,33 @@ import java.util.Objects;
  */
 public final class PocketFiles {
 
+	/**
+	 * File save service instance.
+	 */
 	private final FileSaveService fileSaveService;
+
+	/**
+	 * File open service instance.
+	 */
+	private final FileOpenService fileOpenService;
+
+	/**
+	 * File delete service instance.
+	 */
+	private final FileDeleteService fileDeleteService;
 
 	/**
 	 * Creates a new PocketFiles instance.
 	 *
 	 * @param fileSaveService file save service instance
 	 */
-	private PocketFiles(FileSaveService fileSaveService) {
+	private PocketFiles(
+			FileSaveService fileSaveService,
+			FileOpenService fileOpenService,
+			FileDeleteService fileDeleteService) {
 		this.fileSaveService = Objects.requireNonNull(fileSaveService, "fileSaveService must not be null");
+		this.fileOpenService = Objects.requireNonNull(fileOpenService, "fileOpenService must not be null");
+		this.fileDeleteService = Objects.requireNonNull(fileDeleteService, "fileDeleteService must not be null");
 	}
 
 	/**
@@ -82,7 +105,10 @@ public final class PocketFiles {
 
 		DatabaseConnectionFactory databaseConnectionFactory = new DatabaseConnectionFactory(storageDirectories);
 
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
 		MetadataSchemaInitializer metadataSchemaInitializer = new MetadataSchemaInitializer(databaseConnectionFactory);
+
 		metadataSchemaInitializer.initialize();
 
 		LocalFileStorage localFileStorage = new LocalFileStorage(
@@ -91,15 +117,29 @@ public final class PocketFiles {
 				new LocalPathStrategy(config),
 				new FinalFileMover(storageDirectories));
 
+		// File save service
 		FileSaveService fileSaveService = new FileSaveService(
 				localFileStorage,
 				new LocalFileDeleter(),
 				new MetadataTransactionManager(databaseConnectionFactory),
-				new PhysicalFileRepository(),
-				new FileUsageRepository(),
+				physicalFileRepository,
+				fileUsageRepository,
 				clock);
 
-		return new PocketFiles(fileSaveService);
+		// File open service
+		FileOpenService fileOpenService = new FileOpenService(
+				databaseConnectionFactory,
+				fileUsageRepository,
+				physicalFileRepository,
+				storageDirectories);
+
+		// File delete service
+		FileDeleteService fileDeleteService = new FileDeleteService(
+				databaseConnectionFactory,
+				fileUsageRepository,
+				clock);
+
+		return new PocketFiles(fileSaveService, fileOpenService, fileDeleteService);
 	}
 
 	/**
@@ -112,5 +152,32 @@ public final class PocketFiles {
 	 */
 	public SaveFileResult save(SaveFileCommand command) throws IOException, SQLException {
 		return this.fileSaveService.save(command);
+	}
+
+	/**
+	 * Opens an existing file by file usage UUID.
+	 *
+	 * @param fileUsageUuid file usage UUID
+	 * @return open file result
+	 * @throws IOException  if the physical file is missing on disk
+	 * @throws SQLException if metadata lookup fails
+	 */
+	public OpenFileResult open(UUID fileUsageUuid) throws IOException, SQLException {
+		return this.fileOpenService.open(fileUsageUuid);
+	}
+
+	/**
+	 * Soft deletes a file usage by UUID.
+	 *
+	 * <p>
+	 * This method does not delete the physical file from disk. It only marks the
+	 * logical file usage as deleted.
+	 *
+	 * @param fileUsageUuid file usage UUID
+	 * @return deleted file usage metadata
+	 * @throws SQLException if metadata lookup or update fails
+	 */
+	public FileUsageMetadata delete(UUID fileUsageUuid) throws SQLException {
+		return this.fileDeleteService.delete(fileUsageUuid);
 	}
 }
