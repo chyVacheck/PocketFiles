@@ -5,6 +5,7 @@ import com.chyvacheck.pocketfiles.storage.StorageDirectories;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Objects;
 
 /**
@@ -19,6 +20,10 @@ import java.util.Objects;
  * initialized before opening a connection.
  */
 public final class DatabaseConnectionFactory {
+
+	private static final String ENABLE_FOREIGN_KEYS_SQL = """
+			PRAGMA foreign_keys = ON
+			""";
 
 	private final StorageDirectories storageDirectories;
 
@@ -40,12 +45,35 @@ public final class DatabaseConnectionFactory {
 	 * If the database file does not exist, SQLite will create it automatically.
 	 * However, the parent directory must already exist.
 	 *
+	 * <p>
+	 * Foreign key checks are enabled for every created connection.
+	 *
 	 * @return opened JDBC connection
-	 * @throws SQLException if the connection cannot be opened
+	 * @throws SQLException if the connection cannot be opened or configured
 	 */
 	public Connection createConnection() throws SQLException {
 		String url = "jdbc:sqlite:" + this.storageDirectories.getDatabasePath();
 
-		return DriverManager.getConnection(url);
+		Connection connection = DriverManager.getConnection(url);
+
+		this.enableForeignKeys(connection);
+
+		return connection;
+	}
+
+	/**
+	 * Enables SQLite foreign key checks for the given connection.
+	 *
+	 * <p>
+	 * SQLite applies this setting per connection, so it must be enabled each time
+	 * a new connection is opened.
+	 *
+	 * @param connection opened JDBC connection
+	 * @throws SQLException if the PRAGMA statement cannot be executed
+	 */
+	private void enableForeignKeys(Connection connection) throws SQLException {
+		try (Statement statement = connection.createStatement()) {
+			statement.executeUpdate(ENABLE_FOREIGN_KEYS_SQL);
+		}
 	}
 }
