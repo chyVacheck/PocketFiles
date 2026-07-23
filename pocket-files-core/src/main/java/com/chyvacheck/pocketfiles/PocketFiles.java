@@ -61,7 +61,10 @@ public final class PocketFiles {
 	/**
 	 * Creates a new PocketFiles instance.
 	 *
-	 * @param fileSaveService file save service instance
+	 * @param fileSaveService    file save service instance
+	 * @param fileOpenService    file open service instance
+	 * @param fileDeleteService  file delete service instance
+	 * @param fileRestoreService file restore service instance
 	 */
 	private PocketFiles(
 			FileSaveService fileSaveService,
@@ -125,13 +128,16 @@ public final class PocketFiles {
 				new LocalPathStrategy(config),
 				new FinalFileMover(storageDirectories));
 
+		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+
 		// File save service
 		FileSaveService fileSaveService = new FileSaveService(
 				localFileStorage,
-				new LocalFileDeleter(),
+				localFileDeleter,
 				new MetadataTransactionManager(databaseConnectionFactory),
 				physicalFileRepository,
 				fileUsageRepository,
+				storageDirectories,
 				clock);
 
 		// File open service

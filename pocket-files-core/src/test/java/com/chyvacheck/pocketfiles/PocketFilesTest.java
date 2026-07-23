@@ -21,14 +21,17 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PocketFilesTest {
+
 	private static final Instant FIXED_INSTANT = Instant.parse("2026-01-02T03:15:00Z");
 
 	private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
@@ -37,7 +40,11 @@ class PocketFilesTest {
 
 	private static final String ORIGINAL_NAME = "photo.PNG";
 
+	private static final String DIFFERENT_ORIGINAL_NAME = "copy.PNG";
+
 	private static final String CONTENT = "Hello";
+
+	private static final String DIFFERENT_CONTENT = "World";
 
 	private static final String MIME_TYPE = "image/png";
 
@@ -57,6 +64,8 @@ class PocketFilesTest {
 
 	@TempDir
 	Path tempDir;
+
+	// ? create
 
 	@Test
 	void shouldThrowExceptionWhenConfigIsNull() {
@@ -88,25 +97,13 @@ class PocketFilesTest {
 		assertTrue(Files.isRegularFile(baseDirectory.resolve("metadata.db")));
 	}
 
+	// ? save
+
 	@Test
 	void shouldSaveFileThroughFacade() throws IOException, SQLException {
 		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
 
-		SaveFileResult result;
-
-		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			SaveFileCommand command = SaveFileCommand.at(
-					inputStream,
-					ORIGINAL_NAME,
-					MIME_TYPE,
-					USAGE_TYPE,
-					OWNER_TYPE,
-					OWNER_ID,
-					DISPLAY_NAME,
-					METADATA_JSON);
-
-			result = pocketFiles.save(command);
-		}
+		SaveFileResult result = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
 
 		assertNotNull(result.storedFile());
 		assertNotNull(result.physicalFileMetadata());
@@ -116,7 +113,7 @@ class PocketFilesTest {
 		assertEquals(CONTENT, Files.readString(result.storedFile().absolutePath()));
 
 		assertEquals(result.storedFile().uuid(), result.physicalFileMetadata().uuid());
-		assertEquals("photo.PNG", result.physicalFileMetadata().originalName());
+		assertEquals(ORIGINAL_NAME, result.physicalFileMetadata().originalName());
 		assertEquals("png", result.physicalFileMetadata().extension());
 		assertEquals(MIME_TYPE, result.physicalFileMetadata().mimeType());
 		assertEquals(5L, result.physicalFileMetadata().sizeBytes());
@@ -149,11 +146,62 @@ class PocketFilesTest {
 		}
 
 		assertEquals("default", result.fileUsageMetadata().usageType());
-		assertEquals("photo.PNG", result.physicalFileMetadata().originalName());
+		assertNull(result.fileUsageMetadata().ownerType());
+		assertNull(result.fileUsageMetadata().ownerId());
+		assertNull(result.fileUsageMetadata().displayName());
+		assertNull(result.fileUsageMetadata().metadataJson());
+
+		assertEquals(ORIGINAL_NAME, result.physicalFileMetadata().originalName());
 		assertEquals("png", result.physicalFileMetadata().extension());
 		assertEquals(HELLO_SHA256, result.physicalFileMetadata().sha256());
+
 		assertTrue(Files.exists(result.storedFile().absolutePath()));
 	}
+
+	@Test
+	void shouldReuseExistingPhysicalFileWhenSavingSameContentThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult firstResult = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
+		SaveFileResult secondResult = this.saveFile(pocketFiles, CONTENT, DIFFERENT_ORIGINAL_NAME);
+
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.physicalFileMetadata().id());
+		assertEquals(firstResult.physicalFileMetadata().uuid(), secondResult.physicalFileMetadata().uuid());
+		assertEquals(firstResult.physicalFileMetadata().relativePath(),
+				secondResult.physicalFileMetadata().relativePath());
+		assertEquals(firstResult.storedFile().absolutePath(), secondResult.storedFile().absolutePath());
+
+		assertNotEquals(firstResult.fileUsageMetadata().id(), secondResult.fileUsageMetadata().id());
+		assertNotEquals(firstResult.fileUsageMetadata().uuid(), secondResult.fileUsageMetadata().uuid());
+
+		assertEquals(firstResult.physicalFileMetadata().id(), firstResult.fileUsageMetadata().physicalFileId());
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.fileUsageMetadata().physicalFileId());
+
+		assertEquals(1L, this.countRegularFiles(this.getBaseDirectory().resolve("files")));
+		assertEquals(0L, this.countRegularFiles(this.getBaseDirectory().resolve(".tmp")));
+	}
+
+	@Test
+	void shouldCreateNewPhysicalFileWhenContentIsDifferentThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult firstResult = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
+		SaveFileResult secondResult = this.saveFile(pocketFiles, DIFFERENT_CONTENT, ORIGINAL_NAME);
+
+		assertNotEquals(firstResult.physicalFileMetadata().id(), secondResult.physicalFileMetadata().id());
+		assertNotEquals(firstResult.physicalFileMetadata().uuid(), secondResult.physicalFileMetadata().uuid());
+		assertNotEquals(firstResult.physicalFileMetadata().relativePath(),
+				secondResult.physicalFileMetadata().relativePath());
+		assertNotEquals(firstResult.physicalFileMetadata().sha256(), secondResult.physicalFileMetadata().sha256());
+
+		assertNotEquals(firstResult.fileUsageMetadata().id(), secondResult.fileUsageMetadata().id());
+		assertNotEquals(firstResult.fileUsageMetadata().uuid(), secondResult.fileUsageMetadata().uuid());
+
+		assertEquals(2L, this.countRegularFiles(this.getBaseDirectory().resolve("files")));
+		assertEquals(0L, this.countRegularFiles(this.getBaseDirectory().resolve(".tmp")));
+	}
+
+	// ? open
 
 	@Test
 	void shouldOpenFileThroughFacade() throws IOException, SQLException {
@@ -178,28 +226,6 @@ class PocketFilesTest {
 	}
 
 	@Test
-	void shouldDeleteFileUsageThroughFacade() throws IOException, SQLException {
-		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
-
-		SaveFileResult saveResult;
-
-		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
-
-			saveResult = pocketFiles.save(command);
-		}
-
-		FileUsageMetadata deletedMetadata = pocketFiles.delete(
-				saveResult.fileUsageMetadata().uuid());
-
-		assertEquals(saveResult.fileUsageMetadata().id(), deletedMetadata.id());
-		assertEquals(saveResult.fileUsageMetadata().uuid(), deletedMetadata.uuid());
-		assertEquals(FileUsageStatus.DELETED, deletedMetadata.status());
-		assertEquals(CREATED_AT, deletedMetadata.createdAt());
-		assertEquals(CREATED_AT, deletedMetadata.deletedAt());
-	}
-
-	@Test
 	void shouldNotOpenDeletedFileUsageThroughFacade() throws IOException, SQLException {
 		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
 
@@ -221,6 +247,56 @@ class PocketFilesTest {
 				"File usage is not active: " + saveResult.fileUsageMetadata().uuid(),
 				exception.getMessage());
 	}
+
+	@Test
+	void shouldOpenRestoredFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
+		pocketFiles.restore(saveResult.fileUsageMetadata().uuid());
+
+		OpenFileResult openResult = pocketFiles.open(saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.fileUsageMetadata().uuid(), openResult.fileUsageMetadata().uuid());
+		assertEquals(FileUsageStatus.ACTIVE, openResult.fileUsageMetadata().status());
+		assertEquals(saveResult.storedFile().absolutePath(), openResult.absolutePath());
+		assertTrue(Files.isRegularFile(openResult.absolutePath()));
+		assertEquals(CONTENT, Files.readString(openResult.absolutePath()));
+	}
+
+	// ? delete
+
+	@Test
+	void shouldDeleteFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		FileUsageMetadata deletedMetadata = pocketFiles.delete(
+				saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.fileUsageMetadata().id(), deletedMetadata.id());
+		assertEquals(saveResult.fileUsageMetadata().uuid(), deletedMetadata.uuid());
+		assertEquals(FileUsageStatus.DELETED, deletedMetadata.status());
+		assertEquals(CREATED_AT, deletedMetadata.createdAt());
+		assertEquals(CREATED_AT, deletedMetadata.deletedAt());
+	}
+
+	// ? restore
 
 	@Test
 	void shouldRestoreFileUsageThroughFacade() throws IOException, SQLException {
@@ -248,35 +324,39 @@ class PocketFilesTest {
 		assertNull(restoredMetadata.deletedAt());
 	}
 
-	@Test
-	void shouldOpenRestoredFileUsageThroughFacade() throws IOException, SQLException {
-		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+	// ? helpers
 
-		SaveFileResult saveResult;
+	private SaveFileResult saveFile(
+			PocketFiles pocketFiles,
+			String content,
+			String originalName) throws IOException, SQLException {
+		try (InputStream inputStream = this.createInputStream(content)) {
+			SaveFileCommand command = SaveFileCommand.at(
+					inputStream,
+					originalName,
+					MIME_TYPE,
+					USAGE_TYPE,
+					OWNER_TYPE,
+					OWNER_ID,
+					DISPLAY_NAME,
+					METADATA_JSON);
 
-		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
-
-			saveResult = pocketFiles.save(command);
+			return pocketFiles.save(command);
 		}
-
-		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
-		pocketFiles.restore(saveResult.fileUsageMetadata().uuid());
-
-		OpenFileResult openResult = pocketFiles.open(saveResult.fileUsageMetadata().uuid());
-
-		assertEquals(saveResult.fileUsageMetadata().uuid(), openResult.fileUsageMetadata().uuid());
-		assertEquals(FileUsageStatus.ACTIVE, openResult.fileUsageMetadata().status());
-		assertEquals(saveResult.storedFile().absolutePath(), openResult.absolutePath());
-		assertTrue(Files.isRegularFile(openResult.absolutePath()));
-		assertEquals(CONTENT, Files.readString(openResult.absolutePath()));
 	}
 
-	/**
-	 * Creates a new {@link PocketFilesConfig} instance with the default values.
-	 *
-	 * @return The created {@link PocketFilesConfig} instance.
-	 */
+	private long countRegularFiles(Path directory) throws IOException {
+		if (!Files.exists(directory)) {
+			return 0L;
+		}
+
+		try (Stream<Path> paths = Files.walk(directory)) {
+			return paths
+					.filter(Files::isRegularFile)
+					.count();
+		}
+	}
+
 	private PocketFilesConfig createConfig() {
 		return PocketFilesConfig.builder()
 				.baseDirectory(this.getBaseDirectory())
@@ -284,21 +364,10 @@ class PocketFilesTest {
 				.build();
 	}
 
-	/**
-	 * Returns the base directory for the test.
-	 *
-	 * @return {@link Path} The base directory for the test.
-	 */
 	private Path getBaseDirectory() {
 		return this.tempDir.resolve("pocket-files");
 	}
 
-	/**
-	 * Creates a new {@link InputStream} instance with the specified content.
-	 *
-	 * @param content The content to wrap in the {@link InputStream}.
-	 * @return The created {@link InputStream} instance.
-	 */
 	private InputStream createInputStream(String content) {
 		return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
 	}
