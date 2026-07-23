@@ -4,11 +4,13 @@ import com.chyvacheck.pocketfiles.config.PocketFilesConfig;
 import com.chyvacheck.pocketfiles.metadata.DatabaseConnectionFactory;
 import com.chyvacheck.pocketfiles.metadata.MetadataSchemaInitializer;
 import com.chyvacheck.pocketfiles.metadata.model.FileUsageMetadata;
+import com.chyvacheck.pocketfiles.metadata.model.PhysicalFileMetadata;
 import com.chyvacheck.pocketfiles.metadata.repository.FileUsageRepository;
 import com.chyvacheck.pocketfiles.metadata.repository.PhysicalFileRepository;
 import com.chyvacheck.pocketfiles.metadata.transaction.MetadataTransactionManager;
 import com.chyvacheck.pocketfiles.service.FileDeleteService;
 import com.chyvacheck.pocketfiles.service.FileOpenService;
+import com.chyvacheck.pocketfiles.service.FilePurgeService;
 import com.chyvacheck.pocketfiles.service.FileRestoreService;
 import com.chyvacheck.pocketfiles.service.FileSaveService;
 import com.chyvacheck.pocketfiles.service.OpenFileResult;
@@ -59,6 +61,11 @@ public final class PocketFiles {
 	private final FileRestoreService fileRestoreService;
 
 	/**
+	 * File purge service instance.
+	 */
+	private final FilePurgeService filePurgeService;
+
+	/**
 	 * Creates a new PocketFiles instance.
 	 *
 	 * @param fileSaveService    file save service instance
@@ -70,11 +77,13 @@ public final class PocketFiles {
 			FileSaveService fileSaveService,
 			FileOpenService fileOpenService,
 			FileDeleteService fileDeleteService,
-			FileRestoreService fileRestoreService) {
+			FileRestoreService fileRestoreService,
+			FilePurgeService filePurgeService) {
 		this.fileSaveService = Objects.requireNonNull(fileSaveService, "fileSaveService must not be null");
 		this.fileOpenService = Objects.requireNonNull(fileOpenService, "fileOpenService must not be null");
 		this.fileDeleteService = Objects.requireNonNull(fileDeleteService, "fileDeleteService must not be null");
 		this.fileRestoreService = Objects.requireNonNull(fileRestoreService, "fileRestoreService must not be null");
+		this.filePurgeService = Objects.requireNonNull(filePurgeService, "filePurgeService must not be null");
 	}
 
 	/**
@@ -161,7 +170,21 @@ public final class PocketFiles {
 				physicalFileRepository,
 				clock);
 
-		return new PocketFiles(fileSaveService, fileOpenService, fileDeleteService, fileRestoreService);
+		// File purge service
+		FilePurgeService filePurgeService = new FilePurgeService(
+				new MetadataTransactionManager(databaseConnectionFactory),
+				fileUsageRepository,
+				physicalFileRepository,
+				new LocalFileDeleter(),
+				storageDirectories,
+				clock);
+
+		return new PocketFiles(
+				fileSaveService,
+				fileOpenService,
+				fileDeleteService,
+				fileRestoreService,
+				filePurgeService);
 	}
 
 	/**
@@ -212,5 +235,16 @@ public final class PocketFiles {
 	 */
 	public FileUsageMetadata restore(UUID fileUsageUuid) throws SQLException {
 		return this.fileRestoreService.restore(fileUsageUuid);
+	}
+
+	/**
+	 * Purges a physical file by UUID.
+	 *
+	 * @param physicalFileUuid {@link UUID} physical file UUID
+	 * @return {@link PhysicalFileMetadata} purged physical file metadata
+	 * @throws SQLException if metadata lookup or update fails
+	 */
+	public PhysicalFileMetadata purge(UUID physicalFileUuid) throws IOException, SQLException {
+		return this.filePurgeService.purge(physicalFileUuid);
 	}
 }

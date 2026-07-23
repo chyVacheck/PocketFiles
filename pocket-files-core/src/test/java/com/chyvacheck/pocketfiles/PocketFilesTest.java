@@ -3,6 +3,7 @@ package com.chyvacheck.pocketfiles;
 import com.chyvacheck.pocketfiles.config.DirectoryDepth;
 import com.chyvacheck.pocketfiles.config.PocketFilesConfig;
 import com.chyvacheck.pocketfiles.metadata.model.FileUsageMetadata;
+import com.chyvacheck.pocketfiles.metadata.model.PhysicalFileMetadata;
 import com.chyvacheck.pocketfiles.metadata.status.FileUsageStatus;
 import com.chyvacheck.pocketfiles.metadata.status.PhysicalFileStatus;
 import com.chyvacheck.pocketfiles.service.OpenFileResult;
@@ -24,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -322,6 +324,70 @@ class PocketFilesTest {
 		assertEquals(FileUsageStatus.ACTIVE, restoredMetadata.status());
 		assertEquals(CREATED_AT, restoredMetadata.createdAt());
 		assertNull(restoredMetadata.deletedAt());
+	}
+
+	// ? purge
+
+	@Test
+	void shouldPurgeDeletedFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+		// PocketFiles pocketFiles = PocketFiles.create(this.createConfig(),
+		// FIXED_CLOCK);
+
+		SaveFileResult saveResult = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
+
+		Path absolutePath = saveResult.storedFile().absolutePath();
+
+		assertTrue(Files.exists(absolutePath));
+
+		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
+
+		PhysicalFileMetadata purgedPhysicalFile = pocketFiles.purge(saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.physicalFileMetadata().id(), purgedPhysicalFile.id());
+		assertEquals(saveResult.physicalFileMetadata().uuid(), purgedPhysicalFile.uuid());
+		assertEquals(PhysicalFileStatus.DELETED, purgedPhysicalFile.status());
+		assertEquals(FIXED_INSTANT.toEpochMilli(), purgedPhysicalFile.statusChangedAt());
+		assertEquals(FIXED_INSTANT.toEpochMilli(), purgedPhysicalFile.deletedAt());
+		assertFalse(Files.exists(absolutePath));
+	}
+
+	@Test
+	void shouldThrowExceptionWhenPurgingActiveFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
+
+		SQLException exception = assertThrows(
+				SQLException.class,
+				() -> pocketFiles.purge(saveResult.fileUsageMetadata().uuid()));
+
+		assertEquals("Transaction failed", exception.getMessage());
+		assertEquals(IllegalStateException.class, exception.getCause().getClass());
+		assertEquals(
+				"File usage must be deleted before purge: " + saveResult.fileUsageMetadata().uuid(),
+				exception.getCause().getMessage());
+
+		assertTrue(Files.exists(saveResult.storedFile().absolutePath()));
+	}
+
+	@Test
+	void shouldReturnDeletedPhysicalFileWhenPurgingAlreadyPurgedFileUsageThroughFacade()
+			throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult = this.saveFile(pocketFiles, CONTENT, ORIGINAL_NAME);
+
+		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
+
+		PhysicalFileMetadata firstPurge = pocketFiles.purge(saveResult.fileUsageMetadata().uuid());
+		PhysicalFileMetadata secondPurge = pocketFiles.purge(saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(firstPurge.id(), secondPurge.id());
+		assertEquals(firstPurge.uuid(), secondPurge.uuid());
+		assertEquals(PhysicalFileStatus.DELETED, secondPurge.status());
+		assertEquals(firstPurge.statusChangedAt(), secondPurge.statusChangedAt());
+		assertEquals(firstPurge.deletedAt(), secondPurge.deletedAt());
 	}
 
 	// ? helpers
