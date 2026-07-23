@@ -8,6 +8,8 @@ import com.chyvacheck.pocketfiles.metadata.model.PhysicalFileMetadata;
 import com.chyvacheck.pocketfiles.metadata.repository.FileUsageRepository;
 import com.chyvacheck.pocketfiles.metadata.repository.PhysicalFileRepository;
 import com.chyvacheck.pocketfiles.metadata.status.FileUsageStatus;
+import com.chyvacheck.pocketfiles.metadata.status.PhysicalFileStatus;
+import com.chyvacheck.pocketfiles.metadata.transaction.MetadataTransactionManager;
 import com.chyvacheck.pocketfiles.storage.StorageDirectories;
 import com.chyvacheck.pocketfiles.storage.StorageInitializer;
 import org.junit.jupiter.api.Test;
@@ -17,15 +19,15 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Tests the behavior of the file restore service.
- */
 class FileRestoreServiceTest {
 
 	private static final UUID PHYSICAL_FILE_UUID = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
@@ -62,49 +64,71 @@ class FileRestoreServiceTest {
 
 	private static final long DELETED_AT = 1760000005000L;
 
+	private static final Instant FIXED_INSTANT = Instant.parse("2026-01-02T03:15:05Z");
+
+	private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
+
+	private static final long STATUS_CHANGED_AT = FIXED_INSTANT.toEpochMilli();
+
 	@TempDir
 	Path tempDir;
 
-	/**
-	 * Tests the behavior of the file restore service when the database connection
-	 * factory is null.
-	 *
-	 * @throws NullPointerException if the database connection factory is null
-	 */
+	// ? constructor
+
 	@Test
-	void shouldThrowExceptionWhenDatabaseConnectionFactoryIsNull() {
+	void shouldThrowExceptionWhenTransactionManagerIsNull() {
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new FileRestoreService(
 						null,
-						new FileUsageRepository()));
+						new FileUsageRepository(),
+						new PhysicalFileRepository(),
+						FIXED_CLOCK));
 
-		assertEquals("databaseConnectionFactory must not be null", exception.getMessage());
+		assertEquals("transactionManager must not be null", exception.getMessage());
 	}
 
-	/**
-	 * Tests the behavior of the file restore service when the file usage repository
-	 * is null.
-	 *
-	 * @throws NullPointerException if the file usage repository is null
-	 */
 	@Test
 	void shouldThrowExceptionWhenFileUsageRepositoryIsNull() {
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new FileRestoreService(
-						this.createDatabaseConnectionFactory(),
-						null));
+						this.createTransactionManager(),
+						null,
+						new PhysicalFileRepository(),
+						FIXED_CLOCK));
 
 		assertEquals("fileUsageRepository must not be null", exception.getMessage());
 	}
 
-	/**
-	 * Tests the behavior of the file restore service when the file usage UUID is
-	 * null.
-	 *
-	 * @throws NullPointerException if the file usage UUID is null
-	 */
+	@Test
+	void shouldThrowExceptionWhenPhysicalFileRepositoryIsNull() {
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> new FileRestoreService(
+						this.createTransactionManager(),
+						new FileUsageRepository(),
+						null,
+						FIXED_CLOCK));
+
+		assertEquals("physicalFileRepository must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenClockIsNull() {
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> new FileRestoreService(
+						this.createTransactionManager(),
+						new FileUsageRepository(),
+						new PhysicalFileRepository(),
+						null));
+
+		assertEquals("clock must not be null", exception.getMessage());
+	}
+
+	// ? restore
+
 	@Test
 	void shouldThrowExceptionWhenFileUsageUuidIsNull() throws IOException, SQLException {
 		FileRestoreService fileRestoreService = this.createInitializedFileRestoreService();
@@ -116,13 +140,19 @@ class FileRestoreServiceTest {
 		assertEquals("fileUsageUuid must not be null", exception.getMessage());
 	}
 
-	/**
-	 * Tests the behavior of the file restore service when a deleted file usage is
-	 * restored.
-	 *
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
+	@Test
+	void shouldThrowExceptionWhenFileUsageIsNotFound() throws IOException, SQLException {
+		FileRestoreService fileRestoreService = this.createInitializedFileRestoreService();
+
+		SQLException exception = assertThrows(
+				SQLException.class,
+				() -> fileRestoreService.restore(MISSING_FILE_USAGE_UUID));
+
+		assertEquals("Transaction failed", exception.getMessage());
+		assertEquals(IllegalArgumentException.class, exception.getCause().getClass());
+		assertEquals("File usage not found: " + MISSING_FILE_USAGE_UUID, exception.getCause().getMessage());
+	}
+
 	@Test
 	void shouldRestoreDeletedFileUsage() throws IOException, SQLException {
 		TestContext context = this.createTestContext();
@@ -143,13 +173,6 @@ class FileRestoreServiceTest {
 		assertNull(restoredMetadata.deletedAt());
 	}
 
-	/**
-	 * Tests the behavior of the file restore service when a file usage is already
-	 * active.
-	 *
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
 	@Test
 	void shouldReturnFileUsageWhenItIsAlreadyActive() throws IOException, SQLException {
 		TestContext context = this.createTestContext();
@@ -162,31 +185,6 @@ class FileRestoreServiceTest {
 		assertNull(restoredMetadata.deletedAt());
 	}
 
-	/**
-	 * Tests the behavior of the file restore service when a file usage is not
-	 * found.
-	 *
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
-	@Test
-	void shouldThrowExceptionWhenFileUsageIsNotFound() throws IOException, SQLException {
-		FileRestoreService fileRestoreService = this.createInitializedFileRestoreService();
-
-		IllegalArgumentException exception = assertThrows(
-				IllegalArgumentException.class,
-				() -> fileRestoreService.restore(MISSING_FILE_USAGE_UUID));
-
-		assertEquals("File usage not found: " + MISSING_FILE_USAGE_UUID, exception.getMessage());
-	}
-
-	/**
-	 * Tests the behavior of the file restore service when a deleted file usage is
-	 * restored.
-	 *
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
 	@Test
 	void shouldPersistRestoredFileUsage() throws IOException, SQLException {
 		TestContext context = this.createTestContext();
@@ -207,92 +205,105 @@ class FileRestoreServiceTest {
 		}
 	}
 
-	/**
-	 * Creates an initialized file restore service for the test.
-	 *
-	 * @return initialized file restore service
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
+	@Test
+	void shouldMarkOrphanedPhysicalFileAsActiveWhenRestoringDeletedFileUsage() throws IOException, SQLException {
+		TestContext context = this.createTestContext();
+		FileUsageMetadata deletedMetadata = this.insertDeletedFileUsage(context.databaseConnectionFactory());
+
+		context.fileRestoreService().restore(deletedMetadata.uuid());
+
+		try (Connection connection = context.databaseConnectionFactory().createConnection()) {
+			PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+			PhysicalFileMetadata foundPhysicalFile = physicalFileRepository.findById(
+					connection,
+					deletedMetadata.physicalFileId())
+					.orElseThrow();
+
+			assertEquals(PhysicalFileStatus.ACTIVE, foundPhysicalFile.status());
+			assertEquals(STATUS_CHANGED_AT, foundPhysicalFile.statusChangedAt());
+			assertNull(foundPhysicalFile.deletedAt());
+		}
+	}
+
+	// ? helpers
+
 	private FileRestoreService createInitializedFileRestoreService() throws IOException, SQLException {
 		TestContext context = this.createTestContext();
 
 		return context.fileRestoreService();
 	}
 
-	/**
-	 * Creates a test context for the file restore service.
-	 *
-	 * @return test context
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
 	private TestContext createTestContext() throws IOException, SQLException {
 		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
 
 		FileRestoreService fileRestoreService = new FileRestoreService(
-				databaseConnectionFactory,
-				new FileUsageRepository());
+				new MetadataTransactionManager(databaseConnectionFactory),
+				new FileUsageRepository(),
+				new PhysicalFileRepository(),
+				FIXED_CLOCK);
 
 		return new TestContext(fileRestoreService, databaseConnectionFactory);
 	}
 
-	/**
-	 * Inserts an active file usage for the test.
-	 *
-	 * @param databaseConnectionFactory database connection factory
-	 * @return active file usage metadata
-	 * @throws SQLException if database operation fails
-	 */
 	private FileUsageMetadata insertActiveFileUsage(DatabaseConnectionFactory databaseConnectionFactory)
 			throws SQLException {
-		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
-		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+		PhysicalFileMetadata physicalFileMetadata = this.insertPhysicalFile(databaseConnectionFactory);
 
-		try (Connection connection = databaseConnectionFactory.createConnection()) {
-			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
-					connection,
-					this.createNewPhysicalFileMetadata());
-
-			return fileUsageRepository.insert(
-					connection,
-					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
-		}
+		return this.insertFileUsage(
+				databaseConnectionFactory,
+				physicalFileMetadata.id());
 	}
 
-	/**
-	 * Inserts a deleted file usage for the test.
-	 *
-	 * @param databaseConnectionFactory database connection factory
-	 * @return deleted file usage metadata
-	 * @throws SQLException if database operation fails
-	 */
 	private FileUsageMetadata insertDeletedFileUsage(DatabaseConnectionFactory databaseConnectionFactory)
 			throws SQLException {
-		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
-		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+		PhysicalFileMetadata physicalFileMetadata = this.insertPhysicalFile(databaseConnectionFactory);
 
 		try (Connection connection = databaseConnectionFactory.createConnection()) {
-			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
-					connection,
-					this.createNewPhysicalFileMetadata());
+			FileUsageRepository fileUsageRepository = new FileUsageRepository();
+			PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
 
 			FileUsageMetadata insertedMetadata = fileUsageRepository.insert(
 					connection,
 					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
 
-			return fileUsageRepository.markDeleted(
+			FileUsageMetadata deletedMetadata = fileUsageRepository.markDeleted(
 					connection,
 					insertedMetadata.id(),
 					DELETED_AT);
+
+			physicalFileRepository.markOrphaned(
+					connection,
+					physicalFileMetadata.id(),
+					DELETED_AT);
+
+			return deletedMetadata;
 		}
 	}
 
-	/**
-	 * Creates a new physical file metadata for the test.
-	 *
-	 * @return new physical file metadata
-	 */
+	private PhysicalFileMetadata insertPhysicalFile(DatabaseConnectionFactory databaseConnectionFactory)
+			throws SQLException {
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			return physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+		}
+	}
+
+	private FileUsageMetadata insertFileUsage(
+			DatabaseConnectionFactory databaseConnectionFactory,
+			long physicalFileId) throws SQLException {
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			return fileUsageRepository.insert(
+					connection,
+					this.createNewFileUsageMetadata(physicalFileId));
+		}
+	}
+
 	private PhysicalFileMetadata createNewPhysicalFileMetadata() {
 		return PhysicalFileMetadata.newFile(
 				PHYSICAL_FILE_UUID,
@@ -305,12 +316,6 @@ class FileRestoreServiceTest {
 				CREATED_AT);
 	}
 
-	/**
-	 * Creates a new file usage metadata for the test.
-	 *
-	 * @param physicalFileId ID of the physical file
-	 * @return new file usage metadata
-	 */
 	private FileUsageMetadata createNewFileUsageMetadata(long physicalFileId) {
 		return FileUsageMetadata.newUsage(
 				FILE_USAGE_UUID,
@@ -323,13 +328,6 @@ class FileRestoreServiceTest {
 				CREATED_AT);
 	}
 
-	/**
-	 * Creates and initializes the database connection factory for the test.
-	 *
-	 * @return initialized database connection factory
-	 * @throws IOException  if storage initialization fails
-	 * @throws SQLException if metadata schema initialization fails
-	 */
 	private DatabaseConnectionFactory createInitializedDatabaseConnectionFactory() throws IOException, SQLException {
 		StorageDirectories storageDirectories = this.createInitializedStorageDirectories();
 		DatabaseConnectionFactory databaseConnectionFactory = new DatabaseConnectionFactory(storageDirectories);
@@ -339,21 +337,14 @@ class FileRestoreServiceTest {
 		return databaseConnectionFactory;
 	}
 
-	/**
-	 * Creates the database connection factory for the test.
-	 *
-	 * @return database connection factory
-	 */
+	private MetadataTransactionManager createTransactionManager() {
+		return new MetadataTransactionManager(this.createDatabaseConnectionFactory());
+	}
+
 	private DatabaseConnectionFactory createDatabaseConnectionFactory() {
 		return new DatabaseConnectionFactory(this.createStorageDirectories());
 	}
 
-	/**
-	 * Creates and initializes the storage directories for the test.
-	 *
-	 * @return initialized storage directories
-	 * @throws IOException if storage initialization fails
-	 */
 	private StorageDirectories createInitializedStorageDirectories() throws IOException {
 		StorageDirectories storageDirectories = this.createStorageDirectories();
 
@@ -362,32 +353,16 @@ class FileRestoreServiceTest {
 		return storageDirectories;
 	}
 
-	/**
-	 * Creates the storage directories for the test.
-	 *
-	 * @return storage directories
-	 */
 	private StorageDirectories createStorageDirectories() {
 		return new StorageDirectories(this.createConfig());
 	}
 
-	/**
-	 * Creates the configuration for the test.
-	 *
-	 * @return configuration
-	 */
 	private PocketFilesConfig createConfig() {
 		return PocketFilesConfig.builder()
 				.baseDirectory(this.tempDir.resolve("pocket-files"))
 				.build();
 	}
 
-	/**
-	 * Test context for the file restore service.
-	 *
-	 * @param fileRestoreService        file restore service
-	 * @param databaseConnectionFactory database connection factory
-	 */
 	private record TestContext(
 			FileRestoreService fileRestoreService,
 			DatabaseConnectionFactory databaseConnectionFactory) {

@@ -149,14 +149,17 @@ public final class PocketFiles {
 
 		// File delete service
 		FileDeleteService fileDeleteService = new FileDeleteService(
-				databaseConnectionFactory,
+				new MetadataTransactionManager(databaseConnectionFactory),
 				fileUsageRepository,
+				physicalFileRepository,
 				clock);
 
 		// File restore service
 		FileRestoreService fileRestoreService = new FileRestoreService(
-				databaseConnectionFactory,
-				fileUsageRepository);
+				new MetadataTransactionManager(databaseConnectionFactory),
+				fileUsageRepository,
+				physicalFileRepository,
+				clock);
 
 		return new PocketFiles(fileSaveService, fileOpenService, fileDeleteService, fileRestoreService);
 	}
