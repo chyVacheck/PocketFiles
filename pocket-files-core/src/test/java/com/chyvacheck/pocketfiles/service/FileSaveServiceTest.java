@@ -29,28 +29,44 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 class FileSaveServiceTest {
+
 	private static final Instant FIXED_INSTANT = Instant.parse("2026-01-02T03:15:00Z");
+
+	private static final Instant SECOND_FIXED_INSTANT = Instant.parse("2026-01-02T03:16:00Z");
 
 	private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
 
+	private static final Clock SECOND_FIXED_CLOCK = Clock.fixed(SECOND_FIXED_INSTANT, ZoneOffset.UTC);
+
 	private static final long CREATED_AT = FIXED_INSTANT.toEpochMilli();
+
+	private static final long SECOND_CREATED_AT = SECOND_FIXED_INSTANT.toEpochMilli();
+
+	private static final long ORPHANED_AT = CREATED_AT + 1000L;
 
 	private static final String ORIGINAL_NAME = "photo.PNG";
 
+	private static final String DIFFERENT_ORIGINAL_NAME = "copy.PNG";
+
 	private static final String CONTENT = "Hello";
+
+	private static final String DIFFERENT_CONTENT = "World";
 
 	private static final String MIME_TYPE = "image/png";
 
@@ -71,6 +87,8 @@ class FileSaveServiceTest {
 	@TempDir
 	Path tempDir;
 
+	// ? constructor
+
 	@Test
 	void shouldThrowExceptionWhenLocalFileStorageIsNull() {
 		NullPointerException exception = assertThrows(
@@ -78,9 +96,10 @@ class FileSaveServiceTest {
 				() -> new FileSaveService(
 						null,
 						new LocalFileDeleter(),
-						this.createTransactionManager(),
+						this.createMetadataTransactionManager(),
 						new PhysicalFileRepository(),
 						new FileUsageRepository(),
+						this.createStorageDirectories(),
 						FIXED_CLOCK));
 
 		assertEquals("localFileStorage must not be null", exception.getMessage());
@@ -93,9 +112,10 @@ class FileSaveServiceTest {
 				() -> new FileSaveService(
 						this.createLocalFileStorage(),
 						null,
-						this.createTransactionManager(),
+						this.createMetadataTransactionManager(),
 						new PhysicalFileRepository(),
 						new FileUsageRepository(),
+						this.createStorageDirectories(),
 						FIXED_CLOCK));
 
 		assertEquals("localFileDeleter must not be null", exception.getMessage());
@@ -111,6 +131,7 @@ class FileSaveServiceTest {
 						null,
 						new PhysicalFileRepository(),
 						new FileUsageRepository(),
+						this.createStorageDirectories(),
 						FIXED_CLOCK));
 
 		assertEquals("transactionManager must not be null", exception.getMessage());
@@ -123,9 +144,10 @@ class FileSaveServiceTest {
 				() -> new FileSaveService(
 						this.createLocalFileStorage(),
 						new LocalFileDeleter(),
-						this.createTransactionManager(),
+						this.createMetadataTransactionManager(),
 						null,
 						new FileUsageRepository(),
+						this.createStorageDirectories(),
 						FIXED_CLOCK));
 
 		assertEquals("physicalFileRepository must not be null", exception.getMessage());
@@ -138,12 +160,29 @@ class FileSaveServiceTest {
 				() -> new FileSaveService(
 						this.createLocalFileStorage(),
 						new LocalFileDeleter(),
-						this.createTransactionManager(),
+						this.createMetadataTransactionManager(),
 						new PhysicalFileRepository(),
 						null,
+						this.createStorageDirectories(),
 						FIXED_CLOCK));
 
 		assertEquals("fileUsageRepository must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenStorageDirectoriesIsNull() {
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> new FileSaveService(
+						this.createLocalFileStorage(),
+						new LocalFileDeleter(),
+						this.createMetadataTransactionManager(),
+						new PhysicalFileRepository(),
+						new FileUsageRepository(),
+						null,
+						FIXED_CLOCK));
+
+		assertEquals("storageDirectories must not be null", exception.getMessage());
 	}
 
 	@Test
@@ -153,13 +192,16 @@ class FileSaveServiceTest {
 				() -> new FileSaveService(
 						this.createLocalFileStorage(),
 						new LocalFileDeleter(),
-						this.createTransactionManager(),
+						this.createMetadataTransactionManager(),
 						new PhysicalFileRepository(),
 						new FileUsageRepository(),
+						this.createStorageDirectories(),
 						null));
 
 		assertEquals("clock must not be null", exception.getMessage());
 	}
+
+	// ? save
 
 	@Test
 	void shouldThrowExceptionWhenCommandIsNull() throws IOException, SQLException {
@@ -177,21 +219,7 @@ class FileSaveServiceTest {
 		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
 		FileSaveService fileSaveService = this.createFileSaveService(databaseConnectionFactory);
 
-		SaveFileResult result;
-
-		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			SaveFileCommand command = SaveFileCommand.at(
-					inputStream,
-					ORIGINAL_NAME,
-					MIME_TYPE,
-					USAGE_TYPE,
-					OWNER_TYPE,
-					OWNER_ID,
-					DISPLAY_NAME,
-					METADATA_JSON);
-
-			result = fileSaveService.save(command);
-		}
+		SaveFileResult result = this.saveFile(fileSaveService, CONTENT, ORIGINAL_NAME);
 
 		assertNotNull(result.storedFile());
 		assertNotNull(result.physicalFileMetadata());
@@ -201,7 +229,7 @@ class FileSaveServiceTest {
 		assertEquals(CONTENT, Files.readString(result.storedFile().absolutePath()));
 
 		assertEquals(result.storedFile().uuid(), result.physicalFileMetadata().uuid());
-		assertEquals("photo.PNG", result.physicalFileMetadata().originalName());
+		assertEquals(ORIGINAL_NAME, result.physicalFileMetadata().originalName());
 		assertEquals(result.storedFile().relativePath(), result.physicalFileMetadata().relativePath());
 		assertEquals(MIME_TYPE, result.physicalFileMetadata().mimeType());
 		assertEquals("png", result.physicalFileMetadata().extension());
@@ -210,6 +238,7 @@ class FileSaveServiceTest {
 		assertEquals(PhysicalFileStatus.ACTIVE, result.physicalFileMetadata().status());
 		assertEquals(CREATED_AT, result.physicalFileMetadata().createdAt());
 		assertEquals(CREATED_AT, result.physicalFileMetadata().statusChangedAt());
+		assertNull(result.physicalFileMetadata().deletedAt());
 
 		assertNotNull(result.fileUsageMetadata().uuid());
 		assertEquals(result.physicalFileMetadata().id(), result.fileUsageMetadata().physicalFileId());
@@ -220,6 +249,7 @@ class FileSaveServiceTest {
 		assertEquals(METADATA_JSON.trim(), result.fileUsageMetadata().metadataJson());
 		assertEquals(FileUsageStatus.ACTIVE, result.fileUsageMetadata().status());
 		assertEquals(CREATED_AT, result.fileUsageMetadata().createdAt());
+		assertNull(result.fileUsageMetadata().deletedAt());
 
 		try (Connection connection = databaseConnectionFactory.createConnection()) {
 			PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
@@ -257,10 +287,149 @@ class FileSaveServiceTest {
 		assertNull(result.fileUsageMetadata().ownerId());
 		assertNull(result.fileUsageMetadata().displayName());
 		assertNull(result.fileUsageMetadata().metadataJson());
-		assertEquals("photo.PNG", result.physicalFileMetadata().originalName());
+		assertEquals(ORIGINAL_NAME, result.physicalFileMetadata().originalName());
 		assertEquals("png", result.physicalFileMetadata().extension());
 		assertEquals(HELLO_SHA256, result.physicalFileMetadata().sha256());
 		assertTrue(Files.exists(result.storedFile().absolutePath()));
+	}
+
+	@Test
+	void shouldReuseExistingPhysicalFileWhenSavingSameContent() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileSaveService fileSaveService = this.createFileSaveService(databaseConnectionFactory);
+
+		SaveFileResult firstResult = this.saveFile(fileSaveService, CONTENT, ORIGINAL_NAME);
+		SaveFileResult secondResult = this.saveFile(fileSaveService, CONTENT, DIFFERENT_ORIGINAL_NAME);
+
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.physicalFileMetadata().id());
+		assertEquals(firstResult.physicalFileMetadata().uuid(), secondResult.physicalFileMetadata().uuid());
+		assertEquals(firstResult.physicalFileMetadata().relativePath(),
+				secondResult.physicalFileMetadata().relativePath());
+		assertEquals(firstResult.storedFile().absolutePath(), secondResult.storedFile().absolutePath());
+
+		assertNotEquals(firstResult.fileUsageMetadata().id(), secondResult.fileUsageMetadata().id());
+		assertNotEquals(firstResult.fileUsageMetadata().uuid(), secondResult.fileUsageMetadata().uuid());
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.fileUsageMetadata().physicalFileId());
+
+		assertEquals(1L, this.countRegularFiles(this.createStorageDirectories().getFilesDirectory()));
+		assertEquals(0L, this.countRegularFiles(this.createStorageDirectories().getTempDirectory()));
+	}
+
+	@Test
+	void shouldCreateNewPhysicalFileWhenContentIsDifferent() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileSaveService fileSaveService = this.createFileSaveService(databaseConnectionFactory);
+
+		SaveFileResult firstResult = this.saveFile(fileSaveService, CONTENT, ORIGINAL_NAME);
+		SaveFileResult secondResult = this.saveFile(fileSaveService, DIFFERENT_CONTENT, ORIGINAL_NAME);
+
+		assertNotEquals(firstResult.physicalFileMetadata().id(), secondResult.physicalFileMetadata().id());
+		assertNotEquals(firstResult.physicalFileMetadata().uuid(), secondResult.physicalFileMetadata().uuid());
+		assertNotEquals(firstResult.physicalFileMetadata().relativePath(),
+				secondResult.physicalFileMetadata().relativePath());
+		assertNotEquals(firstResult.physicalFileMetadata().sha256(), secondResult.physicalFileMetadata().sha256());
+
+		assertNotEquals(firstResult.fileUsageMetadata().id(), secondResult.fileUsageMetadata().id());
+		assertNotEquals(firstResult.fileUsageMetadata().uuid(), secondResult.fileUsageMetadata().uuid());
+
+		assertEquals(2L, this.countRegularFiles(this.createStorageDirectories().getFilesDirectory()));
+		assertEquals(0L, this.countRegularFiles(this.createStorageDirectories().getTempDirectory()));
+	}
+
+	@Test
+	void shouldMarkOrphanedPhysicalFileAsActiveWhenSavingSameContent() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+
+		FileSaveService firstFileSaveService = this.createFileSaveService(databaseConnectionFactory);
+		SaveFileResult firstResult = this.saveFile(firstFileSaveService, CONTENT, ORIGINAL_NAME);
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			this.markPhysicalFileAsOrphaned(
+					connection,
+					firstResult.physicalFileMetadata().id());
+		}
+
+		FileSaveService secondFileSaveService = this.createFileSaveService(
+				databaseConnectionFactory,
+				SECOND_FIXED_CLOCK);
+
+		SaveFileResult secondResult = this.saveFile(secondFileSaveService, CONTENT, DIFFERENT_ORIGINAL_NAME);
+
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.physicalFileMetadata().id());
+		assertEquals(PhysicalFileStatus.ACTIVE, secondResult.physicalFileMetadata().status());
+		assertEquals(SECOND_CREATED_AT, secondResult.physicalFileMetadata().statusChangedAt());
+		assertNull(secondResult.physicalFileMetadata().deletedAt());
+
+		assertNotEquals(firstResult.fileUsageMetadata().id(), secondResult.fileUsageMetadata().id());
+		assertEquals(firstResult.physicalFileMetadata().id(), secondResult.fileUsageMetadata().physicalFileId());
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+			PhysicalFileMetadata foundPhysicalFile = physicalFileRepository.findById(
+					connection,
+					firstResult.physicalFileMetadata().id())
+					.orElseThrow();
+
+			assertEquals(PhysicalFileStatus.ACTIVE, foundPhysicalFile.status());
+			assertEquals(SECOND_CREATED_AT, foundPhysicalFile.statusChangedAt());
+			assertNull(foundPhysicalFile.deletedAt());
+		}
+
+		assertEquals(1L, this.countRegularFiles(this.createStorageDirectories().getFilesDirectory()));
+		assertEquals(0L, this.countRegularFiles(this.createStorageDirectories().getTempDirectory()));
+	}
+
+	// ? helpers
+
+	private SaveFileResult saveFile(
+			FileSaveService fileSaveService,
+			String content,
+			String originalName) throws IOException, SQLException {
+		try (InputStream inputStream = this.createInputStream(content)) {
+			SaveFileCommand command = SaveFileCommand.at(
+					inputStream,
+					originalName,
+					MIME_TYPE,
+					USAGE_TYPE,
+					OWNER_TYPE,
+					OWNER_ID,
+					DISPLAY_NAME,
+					METADATA_JSON);
+
+			return fileSaveService.save(command);
+		}
+	}
+
+	private void markPhysicalFileAsOrphaned(Connection connection, long physicalFileId) throws SQLException {
+		String sql = """
+				UPDATE physical_files
+				SET
+				    status = ?,
+				    status_changed_at = ?,
+				    deleted_at = NULL
+				WHERE id = ?
+				""";
+
+		try (PreparedStatement statement = connection.prepareStatement(sql)) {
+			statement.setInt(1, PhysicalFileStatus.ORPHANED.getCode());
+			statement.setLong(2, ORPHANED_AT);
+			statement.setLong(3, physicalFileId);
+
+			statement.executeUpdate();
+		}
+	}
+
+	private long countRegularFiles(Path directory) throws IOException {
+		if (!Files.exists(directory)) {
+			return 0L;
+		}
+
+		try (Stream<Path> paths = Files.walk(directory)) {
+			return paths
+					.filter(Files::isRegularFile)
+					.count();
+		}
 	}
 
 	private FileSaveService createInitializedFileSaveService() throws IOException, SQLException {
@@ -270,13 +439,20 @@ class FileSaveServiceTest {
 	}
 
 	private FileSaveService createFileSaveService(DatabaseConnectionFactory databaseConnectionFactory) {
+		return this.createFileSaveService(databaseConnectionFactory, FIXED_CLOCK);
+	}
+
+	private FileSaveService createFileSaveService(
+			DatabaseConnectionFactory databaseConnectionFactory,
+			Clock clock) {
 		return new FileSaveService(
 				this.createLocalFileStorage(),
 				new LocalFileDeleter(),
 				new MetadataTransactionManager(databaseConnectionFactory),
 				new PhysicalFileRepository(),
 				new FileUsageRepository(),
-				FIXED_CLOCK);
+				this.createStorageDirectories(),
+				clock);
 	}
 
 	private DatabaseConnectionFactory createInitializedDatabaseConnectionFactory() throws IOException, SQLException {
@@ -313,6 +489,11 @@ class FileSaveServiceTest {
 		return new StorageDirectories(this.createConfig());
 	}
 
+	private MetadataTransactionManager createMetadataTransactionManager() {
+		return new MetadataTransactionManager(
+				new DatabaseConnectionFactory(this.createStorageDirectories()));
+	}
+
 	private PocketFilesConfig createConfig() {
 		return PocketFilesConfig.builder()
 				.baseDirectory(this.tempDir.resolve("pocket-files"))
@@ -323,10 +504,4 @@ class FileSaveServiceTest {
 	private InputStream createInputStream(String content) {
 		return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
 	}
-
-	private MetadataTransactionManager createTransactionManager() {
-		return new MetadataTransactionManager(
-				new DatabaseConnectionFactory(this.createStorageDirectories()));
-	}
-
 }

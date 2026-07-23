@@ -4,29 +4,36 @@ import com.chyvacheck.pocketfiles.metadata.model.FileUsageMetadata;
 import com.chyvacheck.pocketfiles.metadata.model.PhysicalFileMetadata;
 import com.chyvacheck.pocketfiles.metadata.repository.FileUsageRepository;
 import com.chyvacheck.pocketfiles.metadata.repository.PhysicalFileRepository;
+import com.chyvacheck.pocketfiles.metadata.status.PhysicalFileStatus;
 import com.chyvacheck.pocketfiles.metadata.transaction.MetadataTransactionManager;
 import com.chyvacheck.pocketfiles.storage.LocalFileDeleter;
 import com.chyvacheck.pocketfiles.storage.LocalFileStorage;
+import com.chyvacheck.pocketfiles.storage.StagedFile;
+import com.chyvacheck.pocketfiles.storage.StorageDirectories;
 import com.chyvacheck.pocketfiles.storage.StoredFile;
 
 import java.io.IOException;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service responsible for saving files through PocketFiles.
  *
  * <p>
- * This service coordinates local file storage and SQLite metadata persistence.
- * It saves the file on disk first and then creates the corresponding metadata
- * records in a single database transaction.
+ * This service coordinates local file staging, deduplication, final file
+ * storage
+ * and SQLite metadata persistence.
  */
 public final class FileSaveService {
+
 	private final LocalFileStorage localFileStorage;
 
 	private final LocalFileDeleter localFileDeleter;
@@ -36,6 +43,8 @@ public final class FileSaveService {
 	private final PhysicalFileRepository physicalFileRepository;
 
 	private final FileUsageRepository fileUsageRepository;
+
+	private final StorageDirectories storageDirectories;
 
 	private final Clock clock;
 
@@ -47,6 +56,8 @@ public final class FileSaveService {
 	 * @param transactionManager     metadata transaction manager
 	 * @param physicalFileRepository repository for physical file metadata
 	 * @param fileUsageRepository    repository for file usage metadata
+	 * @param storageDirectories     storage directories used to resolve stored file
+	 *                               paths
 	 * @param clock                  clock used to generate stable timestamps
 	 * @throws NullPointerException if one of the dependencies is null
 	 */
@@ -56,6 +67,7 @@ public final class FileSaveService {
 			MetadataTransactionManager transactionManager,
 			PhysicalFileRepository physicalFileRepository,
 			FileUsageRepository fileUsageRepository,
+			StorageDirectories storageDirectories,
 			Clock clock) {
 		this.localFileStorage = Objects.requireNonNull(localFileStorage, "localFileStorage must not be null");
 		this.localFileDeleter = Objects.requireNonNull(localFileDeleter, "localFileDeleter must not be null");
@@ -64,6 +76,7 @@ public final class FileSaveService {
 				physicalFileRepository,
 				"physicalFileRepository must not be null");
 		this.fileUsageRepository = Objects.requireNonNull(fileUsageRepository, "fileUsageRepository must not be null");
+		this.storageDirectories = Objects.requireNonNull(storageDirectories, "storageDirectories must not be null");
 		this.clock = Objects.requireNonNull(clock, "clock must not be null");
 	}
 
@@ -86,69 +99,191 @@ public final class FileSaveService {
 		long createdAt = now.toEpochMilli();
 		LocalDateTime dateTime = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
 
-		StoredFile storedFile = this.localFileStorage.save(
+		StagedFile stagedFile = this.localFileStorage.stage(
 				command.inputStream(),
-				command.originalName(),
-				dateTime);
+				command.originalName());
+
+		AtomicReference<StoredFile> storedFileForCleanup = new AtomicReference<>();
 
 		try {
-			return this.saveMetadata(command, storedFile, createdAt);
+			SaveFileResult result = this.transactionManager.execute(connection -> {
+				Optional<PhysicalFileMetadata> existingPhysicalFile = this.physicalFileRepository
+						.findBySha256AndSizeBytes(
+								connection,
+								stagedFile.sha256(),
+								stagedFile.sizeBytes());
+
+				// If the file already exists, update the usage metadata
+				if (existingPhysicalFile.isPresent()) {
+					return this.saveUsageForExistingPhysicalFile(
+							connection,
+							command,
+							existingPhysicalFile.get(),
+							createdAt);
+				}
+
+				// If the file does not exist, create a new physical file and usage metadata
+
+				StoredFile storedFile = this.localFileStorage.store(stagedFile, dateTime);
+				storedFileForCleanup.set(storedFile);
+
+				return this.saveNewPhysicalFileAndUsage(
+						connection,
+						command,
+						storedFile,
+						createdAt);
+			});
+
+			this.localFileDeleter.deleteIfExists(stagedFile);
+
+			return result;
 		} catch (SQLException exception) {
-			this.localFileDeleter.deleteIfExists(storedFile);
+			this.cleanupAfterFailedSave(stagedFile, storedFileForCleanup.get(), exception);
 
 			throw exception;
 		}
 	}
 
 	/**
-	 * Saves metadata records for the stored file inside a database transaction.
+	 * Saves a new file usage metadata record for an existing physical file.
 	 *
-	 * @param command    original save command
-	 * @param storedFile stored file from local storage
-	 * @param createdAt  creation timestamp in epoch milliseconds
-	 * @return full save result
+	 * @param connection           database connection
+	 * @param command              save file command
+	 * @param physicalFileMetadata existing physical file metadata
+	 * @param createdAt            timestamp of the record
+	 * @return result containing stored file and created metadata records
 	 * @throws SQLException if metadata persistence fails
 	 */
-	private SaveFileResult saveMetadata(
+	private SaveFileResult saveUsageForExistingPhysicalFile(
+			Connection connection,
+			SaveFileCommand command,
+			PhysicalFileMetadata physicalFileMetadata,
+			long createdAt) throws SQLException {
+
+		// If the file is orphaned, mark it as active
+		if (physicalFileMetadata.status() == PhysicalFileStatus.ORPHANED) {
+			physicalFileMetadata = this.physicalFileRepository.markActive(
+					connection,
+					physicalFileMetadata.id(),
+					createdAt);
+		}
+
+		FileUsageMetadata fileUsageMetadata = this.createFileUsageMetadata(
+				command,
+				physicalFileMetadata.id(),
+				createdAt);
+
+		FileUsageMetadata insertedFileUsageMetadata = this.fileUsageRepository.insert(connection, fileUsageMetadata);
+
+		StoredFile storedFile = this.createStoredFileFromPhysicalFileMetadata(physicalFileMetadata);
+
+		return SaveFileResult.of(
+				storedFile,
+				physicalFileMetadata,
+				insertedFileUsageMetadata);
+	}
+
+	/**
+	 * Saves a new physical file and creates metadata records for it.
+	 *
+	 * @param connection database connection
+	 * @param command    save file command
+	 * @param storedFile stored file record
+	 * @param createdAt  timestamp of the record
+	 * @return result containing stored file and created metadata records
+	 * @throws SQLException if metadata persistence fails
+	 */
+	private SaveFileResult saveNewPhysicalFileAndUsage(
+			Connection connection,
 			SaveFileCommand command,
 			StoredFile storedFile,
 			long createdAt) throws SQLException {
-		return this.transactionManager.execute(connection -> {
-			// Create physical file metadata
-			PhysicalFileMetadata physicalFileMetadata = PhysicalFileMetadata.newFile(
-					storedFile.uuid(),
-					storedFile.originalName(),
-					storedFile.relativePath(),
-					command.mimeType(),
-					storedFile.extension(),
-					storedFile.sizeBytes(),
-					storedFile.sha256(),
-					createdAt);
+		PhysicalFileMetadata physicalFileMetadata = PhysicalFileMetadata.newFile(
+				storedFile.uuid(),
+				storedFile.originalName(),
+				storedFile.relativePath(),
+				command.mimeType(),
+				storedFile.extension(),
+				storedFile.sizeBytes(),
+				storedFile.sha256(),
+				createdAt);
 
-			// Insert physical file metadata into the database
-			PhysicalFileMetadata insertedPhysicalFileMetadata = this.physicalFileRepository.insert(connection,
-					physicalFileMetadata);
+		PhysicalFileMetadata insertedPhysicalFileMetadata = this.physicalFileRepository.insert(connection,
+				physicalFileMetadata);
 
-			// Create file usage metadata
-			FileUsageMetadata fileUsageMetadata = FileUsageMetadata.newUsage(
-					UUID.randomUUID(),
-					insertedPhysicalFileMetadata.id(),
-					command.usageType(),
-					command.ownerType(),
-					command.ownerId(),
-					command.displayName(),
-					command.metadataJson(),
-					createdAt);
+		FileUsageMetadata fileUsageMetadata = this.createFileUsageMetadata(
+				command,
+				insertedPhysicalFileMetadata.id(),
+				createdAt);
 
-			// Insert file usage metadata into the database
-			FileUsageMetadata insertedFileUsageMetadata = this.fileUsageRepository.insert(connection,
-					fileUsageMetadata);
+		FileUsageMetadata insertedFileUsageMetadata = this.fileUsageRepository.insert(connection, fileUsageMetadata);
 
-			// Return the save result
-			return SaveFileResult.of(
-					storedFile,
-					insertedPhysicalFileMetadata,
-					insertedFileUsageMetadata);
-		});
+		return SaveFileResult.of(
+				storedFile,
+				insertedPhysicalFileMetadata,
+				insertedFileUsageMetadata);
+	}
+
+	/**
+	 * Creates a new stored file record from physical file metadata.
+	 *
+	 * @param physicalFileMetadata physical file metadata
+	 * @return new stored file record
+	 */
+	private StoredFile createStoredFileFromPhysicalFileMetadata(PhysicalFileMetadata physicalFileMetadata) {
+		return StoredFile.at(
+				physicalFileMetadata.uuid(),
+				physicalFileMetadata.originalName(),
+				physicalFileMetadata.relativePath(),
+				physicalFileMetadata.extension(),
+				physicalFileMetadata.sizeBytes(),
+				physicalFileMetadata.sha256(),
+				this.storageDirectories.resolveFilePath(physicalFileMetadata.relativePath()));
+	}
+
+	/**
+	 * Creates a new file usage metadata record.
+	 *
+	 * @param command        save file command
+	 * @param physicalFileId ID of the physical file
+	 * @param createdAt      timestamp of the record
+	 * @return new file usage metadata record
+	 */
+	private FileUsageMetadata createFileUsageMetadata(
+			SaveFileCommand command,
+			long physicalFileId,
+			long createdAt) {
+		return FileUsageMetadata.newUsage(
+				UUID.randomUUID(),
+				physicalFileId,
+				command.usageType(),
+				command.ownerType(),
+				command.ownerId(),
+				command.displayName(),
+				command.metadataJson(),
+				createdAt);
+	}
+
+	/**
+	 * Cleans up after a failed save operation by deleting the staged file and
+	 * stored file.
+	 *
+	 * @param stagedFile staged file record
+	 * @param storedFile stored file record
+	 * @param exception  SQLException that caused the failure
+	 */
+	private void cleanupAfterFailedSave(
+			StagedFile stagedFile,
+			StoredFile storedFile,
+			SQLException exception) {
+		try {
+			if (storedFile != null) {
+				this.localFileDeleter.deleteIfExists(storedFile);
+			}
+
+			this.localFileDeleter.deleteIfExists(stagedFile);
+		} catch (IOException cleanupException) {
+			exception.addSuppressed(cleanupException);
+		}
 	}
 }
