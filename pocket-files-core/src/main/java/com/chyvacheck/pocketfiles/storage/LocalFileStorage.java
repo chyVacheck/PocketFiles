@@ -20,7 +20,7 @@ public final class LocalFileStorage {
 
 	/**
 	 * Constructor, which creates a new instance of LocalFileStorage.
-	 * 
+	 *
 	 * @param tempFileWriter    TempFileWriter instance, which will be used to
 	 *                          create temporary files.
 	 * @param sha256Calculator  Sha256Calculator instance, which will be used to
@@ -43,19 +43,17 @@ public final class LocalFileStorage {
 	}
 
 	/**
-	 * Saves file to local storage.
-	 * 
+	 * Stages file to local storage.
+	 *
 	 * @param inputStream  Input stream, which will be used to read file content.
 	 * @param originalName Original name of the file.
-	 * @param dateTime     Date and time of the file.
-	 * @return StoredFile instance, which contains information about the saved file.
+	 * @return {@link StagedFile} instance, which contains information about the
+	 *         staged file.
 	 * @throws IOException If an I/O error occurs.
 	 */
-	public StoredFile save(InputStream inputStream, String originalName, LocalDateTime dateTime) throws IOException {
-		// validation
+	public StagedFile stage(InputStream inputStream, String originalName) throws IOException {
 		Objects.requireNonNull(inputStream, "inputStream must not be null");
 		Objects.requireNonNull(originalName, "originalName must not be null");
-		Objects.requireNonNull(dateTime, "dateTime must not be null");
 
 		String trimmedOriginalName = originalName.trim();
 
@@ -65,27 +63,54 @@ public final class LocalFileStorage {
 
 		// generate file info
 		String extension = FileExtensionExtractor.extract(trimmedOriginalName);
-		UUID physicalFileUuid = UUID.randomUUID();
 		Path tempFilePath = this.tempFileWriter.write(inputStream);
 		long sizeBytes = Files.size(tempFilePath);
 		String sha256 = this.sha256Calculator.calculate(tempFilePath);
 
+		// return staged file
+		return StagedFile.at(
+				trimmedOriginalName,
+				extension,
+				sizeBytes,
+				sha256,
+				tempFilePath);
+	}
+
+	/**
+	 * Moves a staged file to final local storage.
+	 *
+	 * @param stagedFile {@link StagedFile} instance, which contains information
+	 *                   about the staged file.
+	 * @param dateTime   Date and time of the file.
+	 * @return {@link StoredFile} instance, which contains information about the
+	 *         saved file.
+	 * @throws IOException If an I/O error occurs.
+	 */
+	public StoredFile store(StagedFile stagedFile, LocalDateTime dateTime) throws IOException {
+		Objects.requireNonNull(stagedFile, "stagedFile must not be null");
+		Objects.requireNonNull(dateTime, "dateTime must not be null");
+
+		UUID physicalFileUuid = UUID.randomUUID();
+
+		// generate relative path
 		String relativePath = this.localPathStrategy.generateRelativePath(
 				physicalFileUuid,
-				extension,
+				stagedFile.extension(),
 				dateTime);
 
 		// move file to final path
-		Path absolutePath = this.finalFileMover.move(tempFilePath, relativePath);
+		Path absolutePath = this.finalFileMover.move(
+				stagedFile.tempFilePath(),
+				relativePath);
 
 		// return stored file
 		return StoredFile.at(
 				physicalFileUuid,
-				trimmedOriginalName,
+				stagedFile.originalName(),
 				relativePath,
-				extension,
-				sizeBytes,
-				sha256,
+				stagedFile.extension(),
+				stagedFile.sizeBytes(),
+				stagedFile.sha256(),
 				absolutePath);
 	}
 }

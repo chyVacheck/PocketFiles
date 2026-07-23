@@ -14,13 +14,18 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalFileStorageTest {
+
 	private static final LocalDateTime DATE_TIME = LocalDateTime.of(2026, 1, 2, 3, 15);
 
 	private static final String ORIGINAL_NAME = "photo.PNG";
+
+	private static final String ORIGINAL_NAME_WITHOUT_EXTENSION = "README";
 
 	private static final String CONTENT = "Hello";
 
@@ -29,9 +34,10 @@ class LocalFileStorageTest {
 	@TempDir
 	Path tempDir;
 
+	// ? constructor
+
 	@Test
 	void shouldThrowExceptionWhenTempFileWriterIsNull() {
-		// Act + Assert
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new LocalFileStorage(
@@ -40,13 +46,11 @@ class LocalFileStorageTest {
 						this.createLocalPathStrategy(),
 						this.createFinalFileMover()));
 
-		// Assert
 		assertEquals("tempFileWriter must not be null", exception.getMessage());
 	}
 
 	@Test
 	void shouldThrowExceptionWhenSha256CalculatorIsNull() {
-		// Act + Assert
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new LocalFileStorage(
@@ -55,13 +59,11 @@ class LocalFileStorageTest {
 						this.createLocalPathStrategy(),
 						this.createFinalFileMover()));
 
-		// Assert
 		assertEquals("sha256Calculator must not be null", exception.getMessage());
 	}
 
 	@Test
 	void shouldThrowExceptionWhenLocalPathStrategyIsNull() {
-		// Act + Assert
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new LocalFileStorage(
@@ -70,13 +72,11 @@ class LocalFileStorageTest {
 						null,
 						this.createFinalFileMover()));
 
-		// Assert
 		assertEquals("localPathStrategy must not be null", exception.getMessage());
 	}
 
 	@Test
 	void shouldThrowExceptionWhenFinalFileMoverIsNull() {
-		// Act + Assert
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
 				() -> new LocalFileStorage(
@@ -85,101 +85,136 @@ class LocalFileStorageTest {
 						this.createLocalPathStrategy(),
 						null));
 
-		// Assert
 		assertEquals("finalFileMover must not be null", exception.getMessage());
 	}
 
+	// ? stage
+
 	@Test
-	void shouldThrowExceptionWhenInputStreamIsNull() throws IOException {
-		// Arrange
+	void shouldThrowExceptionWhenStageInputStreamIsNull() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
-		// Act + Assert
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
-				() -> localFileStorage.save(null, ORIGINAL_NAME, DATE_TIME));
+				() -> localFileStorage.stage(null, ORIGINAL_NAME));
 
-		// Assert
 		assertEquals("inputStream must not be null", exception.getMessage());
 	}
 
 	@Test
-	void shouldThrowExceptionWhenOriginalNameIsNull() throws IOException {
-		// Arrange
+	void shouldThrowExceptionWhenStageOriginalNameIsNull() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
 		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			// Act + Assert
 			NullPointerException exception = assertThrows(
 					NullPointerException.class,
-					() -> localFileStorage.save(inputStream, null, DATE_TIME));
+					() -> localFileStorage.stage(inputStream, null));
 
-			// Assert
 			assertEquals("originalName must not be null", exception.getMessage());
 		}
 	}
 
 	@Test
-	void shouldThrowExceptionWhenOriginalNameIsBlank() throws IOException {
-		// Arrange
+	void shouldThrowExceptionWhenStageOriginalNameIsBlank() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
 		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			// Act + Assert
 			IllegalArgumentException exception = assertThrows(
 					IllegalArgumentException.class,
-					() -> localFileStorage.save(inputStream, " ", DATE_TIME));
+					() -> localFileStorage.stage(inputStream, "   "));
 
-			// Assert
 			assertEquals("originalName must not be blank", exception.getMessage());
 		}
 	}
 
 	@Test
-	void shouldThrowExceptionWhenDateTimeIsNull() throws IOException {
-		// Arrange
+	void shouldStageFile() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
-		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			// Act + Assert
-			NullPointerException exception = assertThrows(
-					NullPointerException.class,
-					() -> localFileStorage.save(inputStream, ORIGINAL_NAME, null));
+		StagedFile stagedFile;
 
-			// Assert
-			assertEquals("dateTime must not be null", exception.getMessage());
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			stagedFile = localFileStorage.stage(inputStream, ORIGINAL_NAME);
 		}
+
+		assertEquals(ORIGINAL_NAME, stagedFile.originalName());
+		assertEquals("png", stagedFile.extension());
+		assertEquals(5L, stagedFile.sizeBytes());
+		assertEquals(HELLO_SHA256, stagedFile.sha256());
+
+		assertTrue(Files.exists(stagedFile.tempFilePath()));
+		assertTrue(Files.isRegularFile(stagedFile.tempFilePath()));
+		assertEquals(CONTENT, Files.readString(stagedFile.tempFilePath()));
 	}
 
 	@Test
-	void shouldTrimOriginalName() throws IOException {
-		// Arrange
+	void shouldStageFileWithoutExtension() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
-		StoredFile storedFile;
+		StagedFile stagedFile;
 
 		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			// Act
-			storedFile = localFileStorage.save(inputStream, " photo.PNG ", DATE_TIME);
+			stagedFile = localFileStorage.stage(inputStream, ORIGINAL_NAME_WITHOUT_EXTENSION);
 		}
 
-		// Assert
-		assertEquals("photo.PNG", storedFile.originalName());
+		assertEquals(ORIGINAL_NAME_WITHOUT_EXTENSION, stagedFile.originalName());
+		assertNull(stagedFile.extension());
+		assertEquals(5L, stagedFile.sizeBytes());
+		assertEquals(HELLO_SHA256, stagedFile.sha256());
+
+		assertTrue(Files.exists(stagedFile.tempFilePath()));
+		assertTrue(Files.isRegularFile(stagedFile.tempFilePath()));
+		assertEquals(CONTENT, Files.readString(stagedFile.tempFilePath()));
 	}
 
 	@Test
-	void shouldSaveFile() throws IOException {
-		// Arrange
+	void shouldTrimOriginalNameWhenStageFile() throws IOException {
 		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
 
-		StoredFile storedFile;
+		StagedFile stagedFile;
 
 		try (InputStream inputStream = this.createInputStream(CONTENT)) {
-			// Act
-			storedFile = localFileStorage.save(inputStream, ORIGINAL_NAME, DATE_TIME);
+			stagedFile = localFileStorage.stage(inputStream, " photo.PNG ");
 		}
 
-		// Assert
+		assertEquals(ORIGINAL_NAME, stagedFile.originalName());
+		assertEquals("png", stagedFile.extension());
+	}
+
+	// ? store
+
+	@Test
+	void shouldThrowExceptionWhenStoreStagedFileIsNull() throws IOException {
+		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> localFileStorage.store(null, DATE_TIME));
+
+		assertEquals("stagedFile must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenStoreDateTimeIsNull() throws IOException {
+		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
+		StagedFile stagedFile = this.stageTestFile(localFileStorage);
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> localFileStorage.store(stagedFile, null));
+
+		assertEquals("dateTime must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldStoreStagedFile() throws IOException {
+		LocalFileStorage localFileStorage = this.createInitializedLocalFileStorage();
+		StagedFile stagedFile = this.stageTestFile(localFileStorage);
+
+		Path tempFilePath = stagedFile.tempFilePath();
+
+		StoredFile storedFile = localFileStorage.store(stagedFile, DATE_TIME);
+
 		assertEquals(ORIGINAL_NAME, storedFile.originalName());
 		assertEquals("png", storedFile.extension());
 		assertEquals(5L, storedFile.sizeBytes());
@@ -188,9 +223,18 @@ class LocalFileStorageTest {
 		assertTrue(storedFile.relativePath().startsWith("2026/01/02/"));
 		assertTrue(storedFile.relativePath().endsWith(".png"));
 
+		assertFalse(Files.exists(tempFilePath));
 		assertTrue(Files.exists(storedFile.absolutePath()));
 		assertTrue(Files.isRegularFile(storedFile.absolutePath()));
 		assertEquals(CONTENT, Files.readString(storedFile.absolutePath()));
+	}
+
+	// ? helpers
+
+	private StagedFile stageTestFile(LocalFileStorage localFileStorage) throws IOException {
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			return localFileStorage.stage(inputStream, ORIGINAL_NAME);
+		}
 	}
 
 	private PocketFilesConfig createConfig() {
