@@ -83,6 +83,17 @@ public final class FileUsageRepository {
 			WHERE id = ?
 			""";
 
+	/**
+	 * SQL statement to mark a file usage metadata as active.
+	 */
+	private static final String MARK_ACTIVE_SQL = """
+			UPDATE file_usages
+			SET
+				status = ?,
+				deleted_at = NULL
+			WHERE id = ?
+			""";
+
 	// Methods
 
 	/**
@@ -226,6 +237,34 @@ public final class FileUsageRepository {
 
 		return this.findById(connection, id)
 				.orElseThrow(() -> new SQLException("Failed to find deleted file usage: " + id));
+	}
+
+	/**
+	 * Marks a file usage metadata as active.
+	 *
+	 * @param connection The database connection to use.
+	 * @param id         The ID of the file usage metadata to mark as active.
+	 * @return The updated file usage metadata.
+	 * @throws SQLException If an SQL error occurs.
+	 */
+	public FileUsageMetadata markActive(Connection connection, long id) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (id <= 0) {
+			throw new IllegalArgumentException("id must be positive");
+		}
+
+		// Mark the file usage metadata as active
+		try (PreparedStatement statement = connection.prepareStatement(MARK_ACTIVE_SQL)) {
+			statement.setInt(1, FileUsageStatus.ACTIVE.getCode());
+			statement.setLong(2, id);
+
+			statement.executeUpdate();
+		}
+
+		// Return the updated file usage metadata
+		return this.findById(connection, id)
+				.orElseThrow(() -> new SQLException("Failed to find active file usage: " + id));
 	}
 
 	// Helpers
