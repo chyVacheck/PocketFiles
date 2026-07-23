@@ -588,6 +588,131 @@ class PhysicalFileRepositoryTest {
 		}
 	}
 
+	// ? markOrphaned
+
+	@Test
+	void shouldThrowExceptionWhenMarkOrphanedConnectionIsNull() {
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> physicalFileRepository.markOrphaned(null, 1L, STATUS_CHANGED_AT));
+
+		assertEquals("connection must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkOrphanedIdIsZero() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> physicalFileRepository.markOrphaned(connection, 0L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkOrphanedIdIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> physicalFileRepository.markOrphaned(connection, -1L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkOrphanedStatusChangedAtIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> physicalFileRepository.markOrphaned(connection, 1L, -1L));
+
+			assertEquals("statusChangedAt must not be negative", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkOrphanedPhysicalFileDoesNotExist() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			SQLException exception = assertThrows(
+					SQLException.class,
+					() -> physicalFileRepository.markOrphaned(connection, 999L, STATUS_CHANGED_AT));
+
+			assertEquals("Failed to find orphaned physical file: 999", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldMarkPhysicalFileAsOrphaned() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			PhysicalFileMetadata orphanedMetadata = physicalFileRepository.markOrphaned(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			assertEquals(insertedMetadata.id(), orphanedMetadata.id());
+			assertEquals(insertedMetadata.uuid(), orphanedMetadata.uuid());
+			assertEquals(insertedMetadata.originalName(), orphanedMetadata.originalName());
+			assertEquals(insertedMetadata.relativePath(), orphanedMetadata.relativePath());
+			assertEquals(insertedMetadata.mimeType(), orphanedMetadata.mimeType());
+			assertEquals(insertedMetadata.extension(), orphanedMetadata.extension());
+			assertEquals(insertedMetadata.sizeBytes(), orphanedMetadata.sizeBytes());
+			assertEquals(insertedMetadata.sha256(), orphanedMetadata.sha256());
+			assertEquals(PhysicalFileStatus.ORPHANED, orphanedMetadata.status());
+			assertEquals(insertedMetadata.createdAt(), orphanedMetadata.createdAt());
+			assertEquals(STATUS_CHANGED_AT, orphanedMetadata.statusChangedAt());
+			assertNull(orphanedMetadata.deletedAt());
+		}
+	}
+
+	@Test
+	void shouldFindOrphanedPhysicalFileAfterMarkOrphaned() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			physicalFileRepository.markOrphaned(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			PhysicalFileMetadata foundMetadata = physicalFileRepository.findById(
+					connection,
+					insertedMetadata.id())
+					.orElseThrow();
+
+			assertEquals(PhysicalFileStatus.ORPHANED, foundMetadata.status());
+			assertEquals(STATUS_CHANGED_AT, foundMetadata.statusChangedAt());
+			assertNull(foundMetadata.deletedAt());
+		}
+	}
+
 	// ? helpers
 
 	private PhysicalFileMetadata createOrphanedPhysicalFileMetadata() {

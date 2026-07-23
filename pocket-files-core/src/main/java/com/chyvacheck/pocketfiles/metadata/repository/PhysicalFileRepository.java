@@ -112,6 +112,18 @@ public final class PhysicalFileRepository {
 			WHERE id = ?
 			""";
 
+	/**
+	 * The SQL statement to mark a physical file as orphaned.
+	 */
+	private static final String MARK_ORPHANED_SQL = """
+			UPDATE physical_files
+			SET
+			    status = ?,
+			    status_changed_at = ?,
+			    deleted_at = NULL
+			WHERE id = ?
+			""";
+
 	// ? methods
 
 	/**
@@ -301,6 +313,41 @@ public final class PhysicalFileRepository {
 
 		return this.findById(connection, id)
 				.orElseThrow(() -> new SQLException("Failed to find active physical file: " + id));
+	}
+
+	/**
+	 * Marks a physical file as orphaned.
+	 *
+	 * @param connection      database connection to use
+	 * @param id              database ID of the physical file metadata
+	 * @param statusChangedAt the timestamp when the status changed
+	 * @return the updated physical file metadata
+	 * @throws SQLException if an SQL error occurs
+	 */
+	public PhysicalFileMetadata markOrphaned(
+			Connection connection,
+			long id,
+			long statusChangedAt) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (id <= 0) {
+			throw new IllegalArgumentException("id must be positive");
+		}
+
+		if (statusChangedAt < 0) {
+			throw new IllegalArgumentException("statusChangedAt must not be negative");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(MARK_ORPHANED_SQL)) {
+			statement.setInt(1, PhysicalFileStatus.ORPHANED.getCode());
+			statement.setLong(2, statusChangedAt);
+			statement.setLong(3, id);
+
+			statement.executeUpdate();
+		}
+
+		return this.findById(connection, id)
+				.orElseThrow(() -> new SQLException("Failed to find orphaned physical file: " + id));
 	}
 
 	// ? helpers
