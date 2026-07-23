@@ -9,6 +9,7 @@ import com.chyvacheck.pocketfiles.metadata.repository.PhysicalFileRepository;
 import com.chyvacheck.pocketfiles.metadata.transaction.MetadataTransactionManager;
 import com.chyvacheck.pocketfiles.service.FileDeleteService;
 import com.chyvacheck.pocketfiles.service.FileOpenService;
+import com.chyvacheck.pocketfiles.service.FileRestoreService;
 import com.chyvacheck.pocketfiles.service.FileSaveService;
 import com.chyvacheck.pocketfiles.service.OpenFileResult;
 import com.chyvacheck.pocketfiles.service.SaveFileCommand;
@@ -53,6 +54,11 @@ public final class PocketFiles {
 	private final FileDeleteService fileDeleteService;
 
 	/**
+	 * File restore service instance.
+	 */
+	private final FileRestoreService fileRestoreService;
+
+	/**
 	 * Creates a new PocketFiles instance.
 	 *
 	 * @param fileSaveService file save service instance
@@ -60,10 +66,12 @@ public final class PocketFiles {
 	private PocketFiles(
 			FileSaveService fileSaveService,
 			FileOpenService fileOpenService,
-			FileDeleteService fileDeleteService) {
+			FileDeleteService fileDeleteService,
+			FileRestoreService fileRestoreService) {
 		this.fileSaveService = Objects.requireNonNull(fileSaveService, "fileSaveService must not be null");
 		this.fileOpenService = Objects.requireNonNull(fileOpenService, "fileOpenService must not be null");
 		this.fileDeleteService = Objects.requireNonNull(fileDeleteService, "fileDeleteService must not be null");
+		this.fileRestoreService = Objects.requireNonNull(fileRestoreService, "fileRestoreService must not be null");
 	}
 
 	/**
@@ -73,8 +81,8 @@ public final class PocketFiles {
 	 * This method creates required storage directories and initializes the SQLite
 	 * metadata schema.
 	 *
-	 * @param config PocketFiles configuration
-	 * @return initialized PocketFiles facade
+	 * @param config {@link PocketFilesConfig} PocketFiles configuration
+	 * @return {@link PocketFiles} initialized PocketFiles facade
 	 * @throws IOException  if storage directories cannot be initialized
 	 * @throws SQLException if metadata schema cannot be initialized
 	 */
@@ -88,9 +96,9 @@ public final class PocketFiles {
 	 * <p>
 	 * This overload is mainly useful for tests.
 	 *
-	 * @param config PocketFiles configuration
-	 * @param clock  clock used for generated timestamps
-	 * @return initialized PocketFiles facade
+	 * @param config {@link PocketFilesConfig} PocketFiles configuration
+	 * @param clock  {@link Clock} clock used for generated timestamps
+	 * @return {@link PocketFiles} initialized PocketFiles facade
 	 * @throws IOException  if storage directories cannot be initialized
 	 * @throws SQLException if metadata schema cannot be initialized
 	 */
@@ -139,14 +147,19 @@ public final class PocketFiles {
 				fileUsageRepository,
 				clock);
 
-		return new PocketFiles(fileSaveService, fileOpenService, fileDeleteService);
+		// File restore service
+		FileRestoreService fileRestoreService = new FileRestoreService(
+				databaseConnectionFactory,
+				fileUsageRepository);
+
+		return new PocketFiles(fileSaveService, fileOpenService, fileDeleteService, fileRestoreService);
 	}
 
 	/**
 	 * Saves a file and creates metadata records for it.
 	 *
-	 * @param command save file command
-	 * @return save file result
+	 * @param command {@link SaveFileCommand} save file command
+	 * @return {@link SaveFileResult} save file result
 	 * @throws IOException  if file storage fails
 	 * @throws SQLException if metadata persistence fails
 	 */
@@ -157,8 +170,8 @@ public final class PocketFiles {
 	/**
 	 * Opens an existing file by file usage UUID.
 	 *
-	 * @param fileUsageUuid file usage UUID
-	 * @return open file result
+	 * @param fileUsageUuid {@link UUID} file usage UUID
+	 * @return {@link OpenFileResult} open file result
 	 * @throws IOException  if the physical file is missing on disk
 	 * @throws SQLException if metadata lookup fails
 	 */
@@ -173,11 +186,22 @@ public final class PocketFiles {
 	 * This method does not delete the physical file from disk. It only marks the
 	 * logical file usage as deleted.
 	 *
-	 * @param fileUsageUuid file usage UUID
-	 * @return deleted file usage metadata
+	 * @param fileUsageUuid {@link UUID} file usage UUID
+	 * @return {@link FileUsageMetadata} deleted file usage metadata
 	 * @throws SQLException if metadata lookup or update fails
 	 */
 	public FileUsageMetadata delete(UUID fileUsageUuid) throws SQLException {
 		return this.fileDeleteService.delete(fileUsageUuid);
+	}
+
+	/**
+	 * Restores a soft deleted file usage by UUID.
+	 *
+	 * @param fileUsageUuid {@link UUID} file usage UUID
+	 * @return {@link FileUsageMetadata} restored file usage metadata
+	 * @throws SQLException if metadata lookup or update fails
+	 */
+	public FileUsageMetadata restore(UUID fileUsageUuid) throws SQLException {
+		return this.fileRestoreService.restore(fileUsageUuid);
 	}
 }

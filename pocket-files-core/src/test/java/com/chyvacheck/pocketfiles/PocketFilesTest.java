@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -221,6 +222,61 @@ class PocketFilesTest {
 				exception.getMessage());
 	}
 
+	@Test
+	void shouldRestoreFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		FileUsageMetadata deletedMetadata = pocketFiles.delete(
+				saveResult.fileUsageMetadata().uuid());
+
+		FileUsageMetadata restoredMetadata = pocketFiles.restore(
+				deletedMetadata.uuid());
+
+		assertEquals(deletedMetadata.id(), restoredMetadata.id());
+		assertEquals(deletedMetadata.uuid(), restoredMetadata.uuid());
+		assertEquals(deletedMetadata.physicalFileId(), restoredMetadata.physicalFileId());
+		assertEquals(FileUsageStatus.ACTIVE, restoredMetadata.status());
+		assertEquals(CREATED_AT, restoredMetadata.createdAt());
+		assertNull(restoredMetadata.deletedAt());
+	}
+
+	@Test
+	void shouldOpenRestoredFileUsageThroughFacade() throws IOException, SQLException {
+		PocketFiles pocketFiles = PocketFiles.create(this.createConfig(), FIXED_CLOCK);
+
+		SaveFileResult saveResult;
+
+		try (InputStream inputStream = this.createInputStream(CONTENT)) {
+			SaveFileCommand command = SaveFileCommand.of(inputStream, ORIGINAL_NAME);
+
+			saveResult = pocketFiles.save(command);
+		}
+
+		pocketFiles.delete(saveResult.fileUsageMetadata().uuid());
+		pocketFiles.restore(saveResult.fileUsageMetadata().uuid());
+
+		OpenFileResult openResult = pocketFiles.open(saveResult.fileUsageMetadata().uuid());
+
+		assertEquals(saveResult.fileUsageMetadata().uuid(), openResult.fileUsageMetadata().uuid());
+		assertEquals(FileUsageStatus.ACTIVE, openResult.fileUsageMetadata().status());
+		assertEquals(saveResult.storedFile().absolutePath(), openResult.absolutePath());
+		assertTrue(Files.isRegularFile(openResult.absolutePath()));
+		assertEquals(CONTENT, Files.readString(openResult.absolutePath()));
+	}
+
+	/**
+	 * Creates a new {@link PocketFilesConfig} instance with the default values.
+	 *
+	 * @return The created {@link PocketFilesConfig} instance.
+	 */
 	private PocketFilesConfig createConfig() {
 		return PocketFilesConfig.builder()
 				.baseDirectory(this.getBaseDirectory())
@@ -228,10 +284,21 @@ class PocketFilesTest {
 				.build();
 	}
 
+	/**
+	 * Returns the base directory for the test.
+	 *
+	 * @return {@link Path} The base directory for the test.
+	 */
 	private Path getBaseDirectory() {
 		return this.tempDir.resolve("pocket-files");
 	}
 
+	/**
+	 * Creates a new {@link InputStream} instance with the specified content.
+	 *
+	 * @param content The content to wrap in the {@link InputStream}.
+	 * @return The created {@link InputStream} instance.
+	 */
 	private InputStream createInputStream(String content) {
 		return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
 	}
