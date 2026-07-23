@@ -75,7 +75,6 @@ public final class PhysicalFileRepository {
 			WHERE uuid = ?
 			""";
 
-	// Methods
 	/**
 	 * SQL statement to find a file usage metadata by SHA-256 and size bytes.
 	 */
@@ -99,6 +98,18 @@ public final class PhysicalFileRepository {
 			  AND status IN (?, ?)
 			ORDER BY created_at ASC
 			LIMIT 1
+			""";
+
+	/**
+	 * The SQL statement to mark a physical file as active.
+	 */
+	private static final String MARK_ACTIVE_SQL = """
+			UPDATE physical_files
+			SET
+				status = ?,
+				status_changed_at = ?,
+				deleted_at = NULL
+			WHERE id = ?
 			""";
 
 	// ? methods
@@ -255,6 +266,41 @@ public final class PhysicalFileRepository {
 				return Optional.of(this.mapRow(resultSet));
 			}
 		}
+	}
+
+	/**
+	 * Marks a physical file as active.
+	 *
+	 * @param connection      database connection to use
+	 * @param id              database ID of the physical file metadata
+	 * @param statusChangedAt the timestamp when the status changed
+	 * @return the updated physical file metadata
+	 * @throws SQLException if an SQL error occurs
+	 */
+	public PhysicalFileMetadata markActive(
+			Connection connection,
+			long id,
+			long statusChangedAt) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (id <= 0) {
+			throw new IllegalArgumentException("id must be positive");
+		}
+
+		if (statusChangedAt < 0) {
+			throw new IllegalArgumentException("statusChangedAt must not be negative");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(MARK_ACTIVE_SQL)) {
+			statement.setInt(1, PhysicalFileStatus.ACTIVE.getCode());
+			statement.setLong(2, statusChangedAt);
+			statement.setLong(3, id);
+
+			statement.executeUpdate();
+		}
+
+		return this.findById(connection, id)
+				.orElseThrow(() -> new SQLException("Failed to find active physical file: " + id));
 	}
 
 	// ? helpers

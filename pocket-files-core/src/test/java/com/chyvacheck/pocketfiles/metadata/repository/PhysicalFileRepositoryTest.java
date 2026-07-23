@@ -463,6 +463,131 @@ class PhysicalFileRepositoryTest {
 		}
 	}
 
+	// ? markActive
+
+	@Test
+	void shouldThrowExceptionWhenMarkActiveConnectionIsNull() {
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> repository.markActive(null, 1L, STATUS_CHANGED_AT));
+
+		assertEquals("connection must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkActiveIdIsZero() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markActive(connection, 0L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkActiveIdIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markActive(connection, -1L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkActiveStatusChangedAtIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markActive(connection, 1L, -1L));
+
+			assertEquals("statusChangedAt must not be negative", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkActivePhysicalFileDoesNotExist() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			SQLException exception = assertThrows(
+					SQLException.class,
+					() -> repository.markActive(connection, 999L, STATUS_CHANGED_AT));
+
+			assertEquals("Failed to find active physical file: 999", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldMarkPhysicalFileMetadataAsActive() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = repository.insert(
+					connection,
+					this.createOrphanedPhysicalFileMetadata());
+
+			PhysicalFileMetadata activeMetadata = repository.markActive(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			assertEquals(insertedMetadata.id(), activeMetadata.id());
+			assertEquals(insertedMetadata.uuid(), activeMetadata.uuid());
+			assertEquals(insertedMetadata.originalName(), activeMetadata.originalName());
+			assertEquals(insertedMetadata.relativePath(), activeMetadata.relativePath());
+			assertEquals(insertedMetadata.mimeType(), activeMetadata.mimeType());
+			assertEquals(insertedMetadata.extension(), activeMetadata.extension());
+			assertEquals(insertedMetadata.sizeBytes(), activeMetadata.sizeBytes());
+			assertEquals(insertedMetadata.sha256(), activeMetadata.sha256());
+			assertEquals(PhysicalFileStatus.ACTIVE, activeMetadata.status());
+			assertEquals(insertedMetadata.createdAt(), activeMetadata.createdAt());
+			assertEquals(STATUS_CHANGED_AT, activeMetadata.statusChangedAt());
+			assertNull(activeMetadata.deletedAt());
+		}
+	}
+
+	@Test
+	void shouldFindActivePhysicalFileMetadataAfterMarkActive() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = repository.insert(
+					connection,
+					this.createOrphanedPhysicalFileMetadata());
+
+			repository.markActive(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			PhysicalFileMetadata foundMetadata = repository.findById(
+					connection,
+					insertedMetadata.id())
+					.orElseThrow();
+
+			assertEquals(PhysicalFileStatus.ACTIVE, foundMetadata.status());
+			assertEquals(STATUS_CHANGED_AT, foundMetadata.statusChangedAt());
+			assertNull(foundMetadata.deletedAt());
+		}
+	}
+
 	// ? helpers
 
 	private PhysicalFileMetadata createOrphanedPhysicalFileMetadata() {
