@@ -553,6 +553,132 @@ class FileUsageRepositoryTest {
 		}
 	}
 
+	// ? countActiveByPhysicalFileId
+
+	@Test
+	void shouldThrowExceptionWhenCountActiveByPhysicalFileIdConnectionIsNull() {
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> fileUsageRepository.countActiveByPhysicalFileId(null, 1L));
+
+		assertEquals("connection must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenCountActiveByPhysicalFileIdPhysicalFileIdIsZero() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> fileUsageRepository.countActiveByPhysicalFileId(connection, 0L));
+
+			assertEquals("physicalFileId must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenCountActiveByPhysicalFileIdPhysicalFileIdIsNegative()
+			throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> fileUsageRepository.countActiveByPhysicalFileId(connection, -1L));
+
+			assertEquals("physicalFileId must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldReturnZeroWhenPhysicalFileHasNoActiveFileUsages() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			long activeUsagesCount = fileUsageRepository.countActiveByPhysicalFileId(
+					connection,
+					physicalFileMetadata.id());
+
+			assertEquals(0L, activeUsagesCount);
+		}
+	}
+
+	@Test
+	void shouldCountActiveFileUsagesByPhysicalFileId() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			fileUsageRepository.insert(
+					connection,
+					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
+
+			FileUsageMetadata secondFileUsageMetadata = FileUsageMetadata.newUsage(
+					UUID.fromString("22222222-2222-2222-2222-222222222222"),
+					physicalFileMetadata.id(),
+					USAGE_TYPE,
+					OWNER_TYPE,
+					OWNER_ID,
+					DISPLAY_NAME,
+					METADATA_JSON,
+					CREATED_AT);
+
+			fileUsageRepository.insert(connection, secondFileUsageMetadata);
+
+			long activeUsagesCount = fileUsageRepository.countActiveByPhysicalFileId(
+					connection,
+					physicalFileMetadata.id());
+
+			assertEquals(2L, activeUsagesCount);
+		}
+	}
+
+	@Test
+	void shouldNotCountDeletedFileUsagesByPhysicalFileId() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository physicalFileRepository = new PhysicalFileRepository();
+		FileUsageRepository fileUsageRepository = new FileUsageRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata physicalFileMetadata = physicalFileRepository.insert(
+					connection,
+					this.createNewPhysicalFileMetadata());
+
+			FileUsageMetadata insertedMetadata = fileUsageRepository.insert(
+					connection,
+					this.createNewFileUsageMetadata(physicalFileMetadata.id()));
+
+			fileUsageRepository.markDeleted(
+					connection,
+					insertedMetadata.id(),
+					DELETED_AT);
+
+			long activeUsagesCount = fileUsageRepository.countActiveByPhysicalFileId(
+					connection,
+					physicalFileMetadata.id());
+
+			assertEquals(0L, activeUsagesCount);
+		}
+	}
+
+	// ? helpers
+
 	private PhysicalFileMetadata createNewPhysicalFileMetadata() {
 		return PhysicalFileMetadata.newFile(
 				PHYSICAL_FILE_UUID,

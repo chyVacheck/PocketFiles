@@ -94,7 +94,17 @@ public final class FileUsageRepository {
 			WHERE id = ?
 			""";
 
-	// Methods
+	/**
+	 * SQL statement to count active file usage metadata by physical file ID.
+	 */
+	private static final String COUNT_ACTIVE_BY_PHYSICAL_FILE_ID_SQL = """
+			SELECT COUNT(*)
+			FROM file_usages
+			WHERE physical_file_id = ?
+			  AND status = ?
+			""";
+
+	// ? methods
 
 	/**
 	 * Inserts a file usage metadata into the database.
@@ -267,7 +277,38 @@ public final class FileUsageRepository {
 				.orElseThrow(() -> new SQLException("Failed to find active file usage: " + id));
 	}
 
-	// Helpers
+	/**
+	 * Counts the number of active file usage metadata for a given physical file ID.
+	 *
+	 * @param connection     The database connection to use.
+	 * @param physicalFileId The ID of the physical file to count active file usage
+	 *                       metadata for.
+	 * @return The number of active file usage metadata for the given physical file
+	 *         ID.
+	 * @throws SQLException If an SQL error occurs.
+	 */
+	public long countActiveByPhysicalFileId(Connection connection, long physicalFileId) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (physicalFileId <= 0) {
+			throw new IllegalArgumentException("physicalFileId must be positive");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(COUNT_ACTIVE_BY_PHYSICAL_FILE_ID_SQL)) {
+			statement.setLong(1, physicalFileId);
+			statement.setInt(2, FileUsageStatus.ACTIVE.getCode());
+
+			try (ResultSet resultSet = statement.executeQuery()) {
+				if (!resultSet.next()) {
+					return 0L;
+				}
+
+				return resultSet.getLong(1);
+			}
+		}
+	}
+
+	// ? helpers
 
 	/**
 	 * Maps the current result set row to file usage metadata.
