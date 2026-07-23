@@ -76,6 +76,32 @@ public final class PhysicalFileRepository {
 			""";
 
 	// Methods
+	/**
+	 * SQL statement to find a file usage metadata by SHA-256 and size bytes.
+	 */
+	private static final String FIND_BY_SHA256_AND_SIZE_BYTES_SQL = """
+			SELECT
+				id,
+				uuid,
+				original_name,
+				relative_path,
+				mime_type,
+				extension,
+				size_bytes,
+				sha256,
+				status,
+				created_at,
+				status_changed_at,
+				deleted_at
+			FROM physical_files
+			WHERE sha256 = ?
+			  AND size_bytes = ?
+			  AND status IN (?, ?)
+			ORDER BY created_at ASC
+			LIMIT 1
+			""";
+
+	// ? methods
 
 	/**
 	 * Inserts a physical file metadata into the database.
@@ -189,7 +215,49 @@ public final class PhysicalFileRepository {
 		}
 	}
 
-	// Helpers
+	/**
+	 * Finds a file usage metadata by SHA-256 and size bytes.
+	 *
+	 * @param connection The database connection to use.
+	 * @param sha256     The SHA-256 hash of the file to find.
+	 * @param sizeBytes  The size of the file to find.
+	 * @return The file usage metadata if found, or an empty optional otherwise.
+	 * @throws SQLException If an SQL error occurs.
+	 */
+	public Optional<PhysicalFileMetadata> findBySha256AndSizeBytes(
+			Connection connection,
+			String sha256,
+			long sizeBytes) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+		Objects.requireNonNull(sha256, "sha256 must not be null");
+
+		String trimmedSha256 = sha256.trim();
+
+		if (trimmedSha256.isBlank()) {
+			throw new IllegalArgumentException("sha256 must not be blank");
+		}
+
+		if (sizeBytes < 0) {
+			throw new IllegalArgumentException("sizeBytes must not be negative");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(FIND_BY_SHA256_AND_SIZE_BYTES_SQL)) {
+			statement.setString(1, trimmedSha256);
+			statement.setLong(2, sizeBytes);
+			statement.setInt(3, PhysicalFileStatus.ACTIVE.getCode());
+			statement.setInt(4, PhysicalFileStatus.ORPHANED.getCode());
+
+			try (ResultSet resultSet = statement.executeQuery()) {
+				if (!resultSet.next()) {
+					return Optional.empty();
+				}
+
+				return Optional.of(this.mapRow(resultSet));
+			}
+		}
+	}
+
+	// ? helpers
 
 	/**
 	 * Maps the current result set row to physical file metadata.

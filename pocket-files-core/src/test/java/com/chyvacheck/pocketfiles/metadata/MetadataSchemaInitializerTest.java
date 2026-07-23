@@ -22,6 +22,8 @@ class MetadataSchemaInitializerTest {
 	@TempDir
 	Path tempDir;
 
+	// ? constructor
+
 	/**
 	 * Checks if an exception is thrown when the {@code databaseConnectionFactory}
 	 * is null.
@@ -38,6 +40,8 @@ class MetadataSchemaInitializerTest {
 		// Assert
 		assertEquals("databaseConnectionFactory must not be null", exception.getMessage());
 	}
+
+	// ? initialize
 
 	/**
 	 * Checks if the {@code physical_files} table is created.
@@ -93,7 +97,7 @@ class MetadataSchemaInitializerTest {
 		metadataSchemaInitializer.initialize();
 
 		// Assert
-		assertTrue(this.indexExists(databaseConnectionFactory, "idx_physical_files_sha256"));
+		assertTrue(this.indexExists(databaseConnectionFactory, "idx_physical_files_sha256_size_bytes"));
 		assertTrue(this.indexExists(databaseConnectionFactory, "idx_physical_files_extension"));
 		assertTrue(this.indexExists(databaseConnectionFactory, "idx_physical_files_mime_type"));
 		assertTrue(this.indexExists(databaseConnectionFactory, "idx_physical_files_status"));
@@ -184,6 +188,8 @@ class MetadataSchemaInitializerTest {
 				SQLException.class,
 				() -> this.execute(databaseConnectionFactory, sql));
 	}
+
+	// ? helpers
 
 	private DatabaseConnectionFactory createDatabaseConnectionFactory() throws IOException {
 		StorageDirectories storageDirectories = this.createInitializedStorageDirectories();

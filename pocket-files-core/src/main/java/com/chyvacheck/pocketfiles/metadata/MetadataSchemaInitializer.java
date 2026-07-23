@@ -59,11 +59,11 @@ public final class MetadataSchemaInitializer {
 			)
 			""";
 
-	// Physical files indexes
+	// ? physical files indexes
 
-	private static final String CREATE_PHYSICAL_FILES_SHA256_INDEX_SQL = """
-			CREATE INDEX IF NOT EXISTS idx_physical_files_sha256
-			ON physical_files (sha256)
+	private static final String CREATE_PHYSICAL_FILES_SHA256_SIZE_BYTES_INDEX_SQL = """
+			CREATE INDEX IF NOT EXISTS idx_physical_files_sha256_size_bytes
+			ON physical_files (sha256, size_bytes)
 			""";
 
 	private static final String CREATE_PHYSICAL_FILES_EXTENSION_INDEX_SQL = """
@@ -96,7 +96,7 @@ public final class MetadataSchemaInitializer {
 			ON physical_files (deleted_at)
 			""";
 
-	// File usages indexes
+	// ? file usages indexes
 
 	private static final String CREATE_FILE_USAGES_PHYSICAL_FILE_ID_INDEX_SQL = """
 			CREATE INDEX IF NOT EXISTS idx_file_usages_physical_file_id
@@ -142,6 +142,8 @@ public final class MetadataSchemaInitializer {
 				"databaseConnectionFactory must not be null");
 	}
 
+	// ? methods
+
 	/**
 	 * Initializes all required metadata tables and indexes.
 	 *
@@ -162,7 +164,7 @@ public final class MetadataSchemaInitializer {
 		}
 	}
 
-	// Create tables
+	// ? create tables
 
 	/**
 	 * Creates the table that stores metadata about physical files on disk.
@@ -184,7 +186,7 @@ public final class MetadataSchemaInitializer {
 		this.execute(connection, CREATE_FILE_USAGES_TABLE_SQL);
 	}
 
-	// Create indexes
+	// ? create indexes
 
 	/**
 	 * Creates indexes for the {@code physical_files} table.
@@ -197,7 +199,7 @@ public final class MetadataSchemaInitializer {
 	 * @throws SQLException if one of the indexes cannot be created
 	 */
 	private void createPhysicalFilesIndexes(Connection connection) throws SQLException {
-		this.execute(connection, CREATE_PHYSICAL_FILES_SHA256_INDEX_SQL);
+		this.execute(connection, CREATE_PHYSICAL_FILES_SHA256_SIZE_BYTES_INDEX_SQL);
 		this.execute(connection, CREATE_PHYSICAL_FILES_EXTENSION_INDEX_SQL);
 		this.execute(connection, CREATE_PHYSICAL_FILES_MIME_TYPE_INDEX_SQL);
 		this.execute(connection, CREATE_PHYSICAL_FILES_STATUS_INDEX_SQL);
@@ -224,6 +226,8 @@ public final class MetadataSchemaInitializer {
 		this.execute(connection, CREATE_FILE_USAGES_CREATED_AT_INDEX_SQL);
 		this.execute(connection, CREATE_FILE_USAGES_DELETED_AT_INDEX_SQL);
 	}
+
+	// ? helpers
 
 	/**
 	 * Executes a SQL statement that does not return a result set.
