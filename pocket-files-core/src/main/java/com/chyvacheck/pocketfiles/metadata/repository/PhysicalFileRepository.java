@@ -124,6 +124,18 @@ public final class PhysicalFileRepository {
 			WHERE id = ?
 			""";
 
+	/**
+	 * The SQL statement to mark a physical file as deleted.
+	 */
+	private static final String MARK_DELETED_SQL = """
+			UPDATE physical_files
+			SET
+			    status = ?,
+			    status_changed_at = ?,
+			    deleted_at = ?
+			WHERE id = ?
+			""";
+
 	// ? methods
 
 	/**
@@ -348,6 +360,42 @@ public final class PhysicalFileRepository {
 
 		return this.findById(connection, id)
 				.orElseThrow(() -> new SQLException("Failed to find orphaned physical file: " + id));
+	}
+
+	/**
+	 * Marks a physical file as deleted.
+	 *
+	 * @param connection database connection to use
+	 * @param id         database ID of the physical file metadata
+	 * @param deletedAt  the timestamp when the file was deleted
+	 * @return the updated physical file metadata
+	 * @throws SQLException if an SQL error occurs
+	 */
+	public PhysicalFileMetadata markDeleted(
+			Connection connection,
+			long id,
+			long deletedAt) throws SQLException {
+		Objects.requireNonNull(connection, "connection must not be null");
+
+		if (id <= 0) {
+			throw new IllegalArgumentException("id must be positive");
+		}
+
+		if (deletedAt < 0) {
+			throw new IllegalArgumentException("deletedAt must not be negative");
+		}
+
+		try (PreparedStatement statement = connection.prepareStatement(MARK_DELETED_SQL)) {
+			statement.setInt(1, PhysicalFileStatus.DELETED.getCode());
+			statement.setLong(2, deletedAt);
+			statement.setLong(3, deletedAt);
+			statement.setLong(4, id);
+
+			statement.executeUpdate();
+		}
+
+		return this.findById(connection, id)
+				.orElseThrow(() -> new SQLException("Failed to find deleted physical file: " + id));
 	}
 
 	// ? helpers

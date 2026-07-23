@@ -713,6 +713,131 @@ class PhysicalFileRepositoryTest {
 		}
 	}
 
+	// ? markDeleted
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedConnectionIsNull() {
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> repository.markDeleted(null, 1L, STATUS_CHANGED_AT));
+
+		assertEquals("connection must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedIdIsZero() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markDeleted(connection, 0L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedIdIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markDeleted(connection, -1L, STATUS_CHANGED_AT));
+
+			assertEquals("id must be positive", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedDeletedAtIsNegative() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			IllegalArgumentException exception = assertThrows(
+					IllegalArgumentException.class,
+					() -> repository.markDeleted(connection, 1L, -1L));
+
+			assertEquals("deletedAt must not be negative", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldThrowExceptionWhenMarkDeletedPhysicalFileDoesNotExist() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			SQLException exception = assertThrows(
+					SQLException.class,
+					() -> repository.markDeleted(connection, 999L, STATUS_CHANGED_AT));
+
+			assertEquals("Failed to find deleted physical file: 999", exception.getMessage());
+		}
+	}
+
+	@Test
+	void shouldMarkPhysicalFileAsDeleted() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = repository.insert(
+					connection,
+					this.createOrphanedPhysicalFileMetadata());
+
+			PhysicalFileMetadata deletedMetadata = repository.markDeleted(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			assertEquals(insertedMetadata.id(), deletedMetadata.id());
+			assertEquals(insertedMetadata.uuid(), deletedMetadata.uuid());
+			assertEquals(insertedMetadata.originalName(), deletedMetadata.originalName());
+			assertEquals(insertedMetadata.relativePath(), deletedMetadata.relativePath());
+			assertEquals(insertedMetadata.mimeType(), deletedMetadata.mimeType());
+			assertEquals(insertedMetadata.extension(), deletedMetadata.extension());
+			assertEquals(insertedMetadata.sizeBytes(), deletedMetadata.sizeBytes());
+			assertEquals(insertedMetadata.sha256(), deletedMetadata.sha256());
+			assertEquals(PhysicalFileStatus.DELETED, deletedMetadata.status());
+			assertEquals(insertedMetadata.createdAt(), deletedMetadata.createdAt());
+			assertEquals(STATUS_CHANGED_AT, deletedMetadata.statusChangedAt());
+			assertEquals(STATUS_CHANGED_AT, deletedMetadata.deletedAt());
+		}
+	}
+
+	@Test
+	void shouldFindDeletedPhysicalFileAfterMarkDeleted() throws IOException, SQLException {
+		DatabaseConnectionFactory databaseConnectionFactory = this.createInitializedDatabaseConnectionFactory();
+		PhysicalFileRepository repository = new PhysicalFileRepository();
+
+		try (Connection connection = databaseConnectionFactory.createConnection()) {
+			PhysicalFileMetadata insertedMetadata = repository.insert(
+					connection,
+					this.createOrphanedPhysicalFileMetadata());
+
+			repository.markDeleted(
+					connection,
+					insertedMetadata.id(),
+					STATUS_CHANGED_AT);
+
+			PhysicalFileMetadata foundMetadata = repository.findById(
+					connection,
+					insertedMetadata.id())
+					.orElseThrow();
+
+			assertEquals(PhysicalFileStatus.DELETED, foundMetadata.status());
+			assertEquals(STATUS_CHANGED_AT, foundMetadata.statusChangedAt());
+			assertEquals(STATUS_CHANGED_AT, foundMetadata.deletedAt());
+		}
+	}
+
 	// ? helpers
 
 	private PhysicalFileMetadata createOrphanedPhysicalFileMetadata() {
