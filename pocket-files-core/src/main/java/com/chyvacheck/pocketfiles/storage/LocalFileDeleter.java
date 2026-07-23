@@ -20,4 +20,16 @@ public final class LocalFileDeleter {
 
 		Files.deleteIfExists(storedFile.absolutePath());
 	}
+
+	/**
+	 * Deletes the staged file from disk if it exists.
+	 *
+	 * @param stagedFile {@link StagedFile} staged file to delete
+	 * @throws IOException if the file cannot be deleted
+	 */
+	public void deleteIfExists(StagedFile stagedFile) throws IOException {
+		Objects.requireNonNull(stagedFile, "stagedFile must not be null");
+
+		Files.deleteIfExists(stagedFile.tempFilePath());
+	}
 }

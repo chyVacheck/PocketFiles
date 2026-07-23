@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -12,9 +11,11 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalFileDeleterTest {
-	private static final UUID UUID_VALUE = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+
+	private static final UUID FILE_UUID = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
 
 	private static final String ORIGINAL_NAME = "photo.png";
 
@@ -26,8 +27,12 @@ class LocalFileDeleterTest {
 
 	private static final String SHA256 = "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969";
 
+	private static final String CONTENT = "Hello";
+
 	@TempDir
 	Path tempDir;
+
+	// ? deleteIfExists StoredFile
 
 	@Test
 	void shouldThrowExceptionWhenStoredFileIsNull() {
@@ -35,17 +40,19 @@ class LocalFileDeleterTest {
 
 		NullPointerException exception = assertThrows(
 				NullPointerException.class,
-				() -> localFileDeleter.deleteIfExists(null));
+				() -> localFileDeleter.deleteIfExists((StoredFile) null));
 
 		assertEquals("storedFile must not be null", exception.getMessage());
 	}
 
 	@Test
-	void shouldDeleteStoredFileWhenFileExists() throws IOException {
+	void shouldDeleteStoredFileIfExists() throws IOException {
 		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+		Path filePath = this.createFile("stored-file.txt");
 
-		Path filePath = this.createFile("photo.png", "Hello");
 		StoredFile storedFile = this.createStoredFile(filePath);
+
+		assertTrue(Files.exists(filePath));
 
 		localFileDeleter.deleteIfExists(storedFile);
 
@@ -53,10 +60,10 @@ class LocalFileDeleterTest {
 	}
 
 	@Test
-	void shouldNotFailWhenFileDoesNotExist() throws IOException {
+	void shouldNotFailWhenStoredFileDoesNotExist() throws IOException {
 		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+		Path filePath = this.tempDir.resolve("missing-stored-file.txt");
 
-		Path filePath = this.tempDir.resolve("missing.png");
 		StoredFile storedFile = this.createStoredFile(filePath);
 
 		localFileDeleter.deleteIfExists(storedFile);
@@ -64,36 +71,72 @@ class LocalFileDeleterTest {
 		assertFalse(Files.exists(filePath));
 	}
 
-	/**
-	 * Creates a file in the temporary directory with the given name and content.
-	 *
-	 * @param fileName file name
-	 * @param content  file content
-	 * @return file path
-	 * @throws IOException if the file cannot be created
-	 */
-	private Path createFile(String fileName, String content) throws IOException {
+	// ? deleteIfExists StagedFile
+
+	@Test
+	void shouldThrowExceptionWhenStagedFileIsNull() {
+		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+
+		NullPointerException exception = assertThrows(
+				NullPointerException.class,
+				() -> localFileDeleter.deleteIfExists((StagedFile) null));
+
+		assertEquals("stagedFile must not be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldDeleteStagedFileIfExists() throws IOException {
+		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+		Path filePath = this.createFile("staged-file.tmp");
+
+		StagedFile stagedFile = this.createStagedFile(filePath);
+
+		assertTrue(Files.exists(filePath));
+
+		localFileDeleter.deleteIfExists(stagedFile);
+
+		assertFalse(Files.exists(filePath));
+	}
+
+	@Test
+	void shouldNotFailWhenStagedFileDoesNotExist() throws IOException {
+		LocalFileDeleter localFileDeleter = new LocalFileDeleter();
+		Path filePath = this.tempDir.resolve("missing-staged-file.tmp");
+
+		StagedFile stagedFile = this.createStagedFile(filePath);
+
+		localFileDeleter.deleteIfExists(stagedFile);
+
+		assertFalse(Files.exists(filePath));
+	}
+
+	// ? helpers
+
+	private Path createFile(String fileName) throws IOException {
 		Path filePath = this.tempDir.resolve(fileName);
 
-		Files.writeString(filePath, content, StandardCharsets.UTF_8);
+		Files.writeString(filePath, CONTENT);
 
 		return filePath;
 	}
 
-	/**
-	 * Creates a stored file with the given absolute path.
-	 *
-	 * @param absolutePath absolute path of the file
-	 * @return stored file
-	 */
 	private StoredFile createStoredFile(Path absolutePath) {
 		return StoredFile.at(
-				UUID_VALUE,
+				FILE_UUID,
 				ORIGINAL_NAME,
 				RELATIVE_PATH,
 				EXTENSION,
 				SIZE_BYTES,
 				SHA256,
 				absolutePath);
+	}
+
+	private StagedFile createStagedFile(Path tempFilePath) {
+		return StagedFile.at(
+				ORIGINAL_NAME,
+				EXTENSION,
+				SIZE_BYTES,
+				SHA256,
+				tempFilePath);
 	}
 }
