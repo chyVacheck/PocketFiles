@@ -1,15 +1,8 @@
 <p align="center">
     <img
-        src="docs/assets/pocketfiles-mascot.png"
-        alt="PocketFiles mascot"
-        width="420"
+        src="docs/assets/pocketfiles-social-preview.png"
+        alt="PocketFiles"
     >
-</p>
-
-<h1 align="center">PocketFiles</h1>
-
-<p align="center">
-    <strong>Designed around files, not business entities.</strong>
 </p>
 
 <p align="center">
